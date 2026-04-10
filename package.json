@@ -68,5 +68,22 @@
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",
     "typescript": "5.7.3"
-  }
+  },
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liuanzhiliuanzhi123/manyu.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/liuanzhiliuanzhi123/manyu/issues"
+  },
+  "homepage": "https://github.com/liuanzhiliuanzhi123/manyu#readme"
 }
