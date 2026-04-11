@@ -24,28 +24,24 @@ const sortOptions = [
 ]
 
 export function ExplorePage({ onViewSpot }: ExplorePageProps) {
-  const { addSpot, selectedSpots, favorites, toggleFavorite } = useTravel()
+  const { addSpot, selectedSpots, favorites, toggleFavorite, searchResults, isSearching, searchSpots } = useTravel()
   const [searchQuery, setSearchQuery] = useState("")
   const [activeCategory, setActiveCategory] = useState("all")
   const [sortBy, setSortBy] = useState("heat")
   const [showFilters, setShowFilters] = useState(false)
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000])
 
+  // 处理搜索输入变化
+  const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value
+    setSearchQuery(query)
+    await searchSpots(query)
+  }
+
   const isInTrip = (id: string) => selectedSpots.some((s) => s.id === id)
 
   const filteredSpots = useMemo(() => {
-    let result = [...sampleSpots]
-
-    // 搜索过滤
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      result = result.filter(
-        (spot) =>
-          spot.name.toLowerCase().includes(query) ||
-          spot.address.toLowerCase().includes(query) ||
-          spot.tags.some((tag) => tag.toLowerCase().includes(query))
-      )
-    }
+    let result = searchQuery ? [...searchResults] : [...sampleSpots]
 
     // 分类过滤
     if (activeCategory !== "all") {
@@ -74,7 +70,7 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
     }
 
     return result
-  }, [searchQuery, activeCategory, sortBy, priceRange])
+  }, [searchQuery, activeCategory, sortBy, priceRange, searchResults, isSearching])
 
   return (
     <div className="min-h-screen pb-24 animate-fade-in">
@@ -91,12 +87,20 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
                 type="text"
                 placeholder="搜索景点、美食、住宿..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={handleSearchChange}
                 className="w-full pl-12 pr-4 py-3.5 bg-secondary rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
               />
+              {isSearching && (
+                <div className="absolute right-12 top-1/2 -translate-y-1/2 animate-spin">
+                  <Search className="w-4 h-4 text-muted-foreground" />
+                </div>
+              )}
               {searchQuery && (
                 <button
-                  onClick={() => setSearchQuery("")}
+                  onClick={async () => {
+                    setSearchQuery("")
+                    await searchSpots("")
+                  }}
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-4 h-4" />

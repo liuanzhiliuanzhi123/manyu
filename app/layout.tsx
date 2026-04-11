@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Noto_Sans_SC } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import Script from 'next/script'
 import './globals.css'
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
@@ -44,6 +45,11 @@ export default function RootLayout({
       <body className={`${notoSansSC.variable} ${geist.variable} ${geistMono.variable} font-sans antialiased`}>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
+        {/* 高德地图 API */}
+        <Script 
+          src="https://webapi.amap.com/maps?v=2.0&key=321d415474c8554fc2103f90e2302cca" 
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   )

@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, ReactNode } from "react"
+import { searchCozeDatabase } from "./coze-api"
 
 export interface Spot {
   id: string
@@ -40,6 +41,9 @@ interface TravelContextType {
   setCurrentPlan: (plan: TripPlan | null) => void
   favorites: string[]
   toggleFavorite: (id: string) => void
+  searchResults: Spot[]
+  isSearching: boolean
+  searchSpots: (query: string) => Promise<void>
 }
 
 const TravelContext = createContext<TravelContextType | undefined>(undefined)
@@ -165,6 +169,8 @@ export function TravelProvider({ children }: { children: ReactNode }) {
   const [savedPlans, setSavedPlans] = useState<TripPlan[]>([])
   const [currentPlan, setCurrentPlan] = useState<TripPlan | null>(null)
   const [favorites, setFavorites] = useState<string[]>([])
+  const [searchResults, setSearchResults] = useState<Spot[]>([])
+  const [isSearching, setIsSearching] = useState(false)
 
   const addSpot = (spot: Spot) => {
     if (!selectedSpots.find((s) => s.id === spot.id)) {
@@ -196,6 +202,39 @@ export function TravelProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const searchSpots = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([])
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      const results = await searchCozeDatabase(query)
+      // 转换结果为 Spot 类型
+      const spots = results.map((item: any) => ({
+        id: item.id || `coze-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: item.name || item.title || "未知景点",
+        type: (item.type || "attraction").toLowerCase() as "attraction" | "restaurant" | "hotel",
+        address: item.address || item.location || "未知地址",
+        rating: item.rating || 4.0,
+        heat: item.heat || 50,
+        ticketPrice: item.ticketPrice || item.price || 0,
+        description: item.description || item.content || "暂无描述",
+        image: item.image || item.photo || "https://placehold.co/600x400?text=No+Image",
+        tags: item.tags || item.keywords || [],
+        openTime: item.openTime || item.openingHours || "",
+        phone: item.phone || item.contact || ""
+      }))
+      setSearchResults(spots)
+    } catch (error) {
+      console.error("搜索失败:", error)
+      setSearchResults([])
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
   return (
     <TravelContext.Provider
       value={{
@@ -210,6 +249,9 @@ export function TravelProvider({ children }: { children: ReactNode }) {
         setCurrentPlan,
         favorites,
         toggleFavorite,
+        searchResults,
+        isSearching,
+        searchSpots,
       }}
     >
       {children}

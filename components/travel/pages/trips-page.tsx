@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { MapPin, Trash2, Eye, X, Clock, Star, ChevronRight, Calendar, Plus } from "lucide-react"
 import { useTravel, Spot } from "@/lib/travel-context"
+import { MapView } from "@/components/travel/map-view"
 import { cn } from "@/lib/utils"
 
 interface TripsPageProps {
@@ -108,6 +109,14 @@ export function TripsPage({ onViewSpot, onNavigate }: TripsPageProps) {
                     <span className="text-muted-foreground">预估总花费</span>
                     <span className="text-xl font-bold text-primary">¥{totalPrice}</span>
                   </div>
+                </div>
+              </div>
+
+              {/* 地图视图 */}
+              <div className="px-6 mb-6">
+                <h3 className="font-semibold text-foreground mb-3">行程地图</h3>
+                <div className="h-[400px]">
+                  <MapView spots={selectedSpots} />
                 </div>
               </div>
 
