@@ -1,22 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState, type ComponentType } from "react"
 import {
-  Sparkles,
+  Bus,
   Calendar,
-  MapPin,
-  Loader2,
+  Car,
   CheckCircle,
-  Lightbulb,
-  Wallet,
+  ChevronRight,
   Clock,
-  ChevronDown,
+  Footprints,
+  Loader2,
+  MapPin,
+  RefreshCcw,
   Save,
-  Share2,
-  RotateCcw,
-  Map,
+  Sparkles,
+  TriangleAlert,
 } from "lucide-react"
-import { useTravel, TripPlan } from "@/lib/travel-context"
+import { MapView, RouteSummaryInfo, TransportMode } from "@/components/travel/map-view"
+import { DailyRouteCard } from "@/components/travel/daily-route-card"
+import { ItinerarySummary } from "@/components/travel/itinerary-summary"
+import { buildAiItinerary } from "@/lib/route-planner"
+import { openRouteInAmapWeb } from "@/lib/open-map-route"
+import { useTravel, type TripPlan } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
 interface AIPlannnerPageProps {
@@ -24,13 +29,41 @@ interface AIPlannnerPageProps {
 }
 
 const paceOptions = [
-  { id: "relaxed", label: "轻松", desc: "每天2-3个地点" },
-  { id: "moderate", label: "适中", desc: "每天3-4个地点" },
-  { id: "intensive", label: "紧凑", desc: "每天4-5个地点" },
+  { id: "relaxed", label: "轻松", desc: "每天 2-3 个地点" },
+  { id: "moderate", label: "适中", desc: "每天 3-4 个地点" },
+  { id: "intensive", label: "紧凑", desc: "每天 4-5 个地点" },
+] as const
+
+const modeOptions: Array<{
+  id: TransportMode
+  label: string
+  icon: ComponentType<{ className?: string }>
+}> = [
+  { id: "driving", label: "驾车", icon: Car },
+  { id: "walking", label: "步行", icon: Footprints },
+  { id: "transit", label: "公交", icon: Bus },
 ]
 
+function createInitialMapSummary(mode: TransportMode): RouteSummaryInfo {
+  return {
+    mode,
+    status: "idle",
+    distance: 0,
+    duration: 0,
+    distanceText: "--",
+    durationText: "--",
+    startName: "--",
+    endName: "--",
+    waypointCount: 0,
+    resolvedCount: 0,
+    message: "请选择当天行程后查看路线",
+    partialErrors: [],
+    fallbackRouteUrl: "",
+  }
+}
+
 export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
-  const { selectedSpots, savePlan, clearSpots } = useTravel()
+  const { selectedSpots, savePlan } = useTravel()
   const [step, setStep] = useState<"config" | "generating" | "result">("config")
   const [settings, setSettings] = useState({
     startDate: "",
@@ -38,95 +71,109 @@ export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
     pace: "moderate",
     departure: "",
     tripName: "",
+    transportMode: "driving" as TransportMode,
   })
-  const [generatedPlan, setGeneratedPlan] = useState<any>(null)
+  const [generatedPlan, setGeneratedPlan] = useState<TripPlan | null>(null)
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0)
+  const [mapMode, setMapMode] = useState<TransportMode>("driving")
+  const [mapSummary, setMapSummary] = useState<RouteSummaryInfo>(
+    createInitialMapSummary("driving")
+  )
   const [showSaveSuccess, setShowSaveSuccess] = useState(false)
 
-  const totalPrice = selectedSpots.reduce((sum, s) => sum + s.ticketPrice, 0)
-  const attractionCount = selectedSpots.filter((s) => s.type === "attraction").length
-  const restaurantCount = selectedSpots.filter((s) => s.type === "restaurant").length
+  const selectedDay = generatedPlan?.days?.[selectedDayIndex] ?? null
 
-  const handleGenerate = () => {
-    if (selectedSpots.length === 0) {
+  useEffect(() => {
+    setMapMode(settings.transportMode)
+    setMapSummary(createInitialMapSummary(settings.transportMode))
+  }, [settings.transportMode])
+
+  useEffect(() => {
+    if (!generatedPlan?.days?.length) {
+      setSelectedDayIndex(0)
       return
     }
+    if (selectedDayIndex > generatedPlan.days.length - 1) {
+      setSelectedDayIndex(0)
+    }
+  }, [generatedPlan?.days, selectedDayIndex])
 
+  const hasSpots = selectedSpots.length > 0
+  const totalTicketPrice = useMemo(
+    () => selectedSpots.reduce((sum, spot) => sum + spot.ticketPrice, 0),
+    [selectedSpots]
+  )
+
+  const statusToneClass = useMemo(() => {
+    if (!generatedPlan?.generationStatus) return "bg-secondary/40 text-muted-foreground"
+    if (generatedPlan.generationStatus === "success")
+      return "bg-emerald-50 text-emerald-700"
+    if (generatedPlan.generationStatus === "partial")
+      return "bg-amber-50 text-amber-700"
+    return "bg-red-50 text-red-600"
+  }, [generatedPlan?.generationStatus])
+
+  const handleGenerate = async () => {
+    if (!hasSpots) return
+    setShowSaveSuccess(false)
     setStep("generating")
 
-    // 模拟AI生成过程
-    setTimeout(() => {
-      const plan = {
-        days: 3,
-        spots: selectedSpots,
-        totalBudget: totalPrice + 500, // 加上其他开销
-        tips: [
-          "建议提前在官网预约故宫门票，避免现场排队",
-          "八达岭长城建议乘坐缆车上山，节省体力",
-          "南锣鼓巷最好傍晚前往，可以体验夜市氛围",
-          "随身携带身份证，部分景点需要实名验证",
-        ],
-        itinerary: [
-          {
-            day: 1,
-            theme: "历史文化探索",
-            spots: selectedSpots.slice(0, Math.ceil(selectedSpots.length / 3)),
-          },
-          {
-            day: 2,
-            theme: "自然风光与美食",
-            spots: selectedSpots.slice(
-              Math.ceil(selectedSpots.length / 3),
-              Math.ceil((selectedSpots.length * 2) / 3)
-            ),
-          },
-          {
-            day: 3,
-            theme: "休闲漫步",
-            spots: selectedSpots.slice(Math.ceil((selectedSpots.length * 2) / 3)),
-          },
-        ],
-      }
-      setGeneratedPlan(plan)
-      setStep("result")
-    }, 3000)
+    const routeResult = await buildAiItinerary({
+      spots: selectedSpots,
+      startDate: settings.startDate,
+      endDate: settings.endDate,
+      pace: settings.pace,
+      departure: settings.departure,
+      transportMode: settings.transportMode,
+    })
+
+    const paceLabel =
+      paceOptions.find((option) => option.id === settings.pace)?.label || "适中"
+    const plan: TripPlan = {
+      id: `draft-${Date.now()}`,
+      name: settings.tripName || "AI 行程规划",
+      startDate: settings.startDate || new Date().toISOString().slice(0, 10),
+      endDate: settings.endDate || new Date().toISOString().slice(0, 10),
+      pace: paceLabel,
+      departure: settings.departure || "酒店/出发地",
+      spots: selectedSpots,
+      createdAt: new Date().toISOString(),
+      days: routeResult.days,
+      totalDays: routeResult.totalDays,
+      totalSpots: routeResult.totalSpots,
+      totalDistanceMeters: routeResult.totalDistanceMeters,
+      totalTravelSeconds: routeResult.totalTravelSeconds,
+      totalPlayMinutes: routeResult.totalPlayMinutes,
+      totalEstimatedCost: routeResult.totalEstimatedCost,
+      generationStatus: routeResult.status,
+      generationNotices: routeResult.notices,
+    }
+
+    setGeneratedPlan(plan)
+    setSelectedDayIndex(0)
+    setMapMode(settings.transportMode)
+    setMapSummary(createInitialMapSummary(settings.transportMode))
+    setStep("result")
   }
 
   const handleSave = () => {
     if (!generatedPlan) return
-
-    const plan: TripPlan = {
+    savePlan({
+      ...generatedPlan,
       id: Date.now().toString(),
-      name: settings.tripName || "我的北京之旅",
-      startDate: settings.startDate,
-      endDate: settings.endDate,
-      pace:
-        paceOptions.find((p) => p.id === settings.pace)?.label || "适中",
-      departure: settings.departure || "未设置",
-      spots: selectedSpots,
       createdAt: new Date().toISOString(),
-    }
-
-    savePlan(plan)
+    })
     setShowSaveSuccess(true)
-
-    setTimeout(() => {
-      setShowSaveSuccess(false)
-    }, 2000)
+    setTimeout(() => setShowSaveSuccess(false), 1800)
   }
 
   const handleReset = () => {
-    setStep("config")
     setGeneratedPlan(null)
-    setSettings({
-      startDate: "",
-      endDate: "",
-      pace: "moderate",
-      departure: "",
-      tripName: "",
-    })
+    setSelectedDayIndex(0)
+    setStep("config")
   }
 
-  if (selectedSpots.length === 0) {
+  if (!hasSpots) {
     return (
       <div className="min-h-screen pb-24 animate-fade-in">
         <header className="px-6 pt-12 pb-6">
@@ -136,22 +183,22 @@ export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
             </div>
             <h1 className="text-2xl font-bold text-foreground">AI智能规划</h1>
           </div>
-          <p className="text-muted-foreground">让AI为您打造完美行程</p>
+          <p className="text-muted-foreground">让 AI 为您生成详细行程路线</p>
         </header>
 
         <div className="px-6 py-12 text-center">
-          <div className="w-32 h-32 mx-auto mb-6 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center">
-            <MapPin className="w-14 h-14 text-primary" />
+          <div className="w-28 h-28 mx-auto mb-6 rounded-full bg-secondary flex items-center justify-center">
+            <MapPin className="w-12 h-12 text-primary" />
           </div>
-          <h3 className="text-xl font-bold text-foreground mb-3">请先添加行程点</h3>
-          <p className="text-muted-foreground mb-8 max-w-xs mx-auto">
-            前往探索页面，挑选您感兴趣的景点、美食和住宿，AI将为您智能规划行程路线
+          <h3 className="text-xl font-bold text-foreground mb-2">请先添加行程点</h3>
+          <p className="text-muted-foreground mb-6">
+            去探索页面选择景点后，AI 才能生成详细时间线与导航路程
           </p>
           <button
             onClick={() => onNavigate("explore")}
-            className="px-8 py-4 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium hover:opacity-90 transition-opacity btn-press"
+            className="px-8 py-4 bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-opacity btn-press"
           >
-            开始探索目的地
+            去探索添加景点
           </button>
         </div>
       </div>
@@ -162,25 +209,13 @@ export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
     return (
       <div className="min-h-screen flex items-center justify-center px-6 animate-fade-in">
         <div className="text-center">
-          <div className="relative w-24 h-24 mx-auto mb-8">
-            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary to-accent animate-pulse-soft" />
-            <div className="absolute inset-2 rounded-full bg-background flex items-center justify-center">
-              <Sparkles className="w-10 h-10 text-primary animate-spin" />
-            </div>
+          <div className="w-20 h-20 mx-auto rounded-full bg-primary/10 flex items-center justify-center mb-6">
+            <Loader2 className="w-10 h-10 text-primary animate-spin" />
           </div>
-          <h2 className="text-2xl font-bold text-foreground mb-3">AI正在规划中</h2>
-          <p className="text-muted-foreground mb-6">
-            正在为您分析 {selectedSpots.length} 个地点的最佳游览路线...
+          <h2 className="text-2xl font-bold text-foreground mb-2">正在生成详细行程</h2>
+          <p className="text-muted-foreground">
+            正在计算每日路线段、时间线和汇总信息，请稍候...
           </p>
-          <div className="flex justify-center gap-1">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="w-2 h-2 rounded-full bg-primary animate-bounce"
-                style={{ animationDelay: `${i * 150}ms` }}
-              />
-            ))}
-          </div>
         </div>
       </div>
     )
@@ -188,145 +223,172 @@ export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
 
   if (step === "result" && generatedPlan) {
     return (
-      <div className="min-h-screen pb-24 animate-fade-in">
-        {/* Header */}
-        <header className="sticky top-0 z-40 bg-gradient-to-r from-primary to-accent px-6 pt-12 pb-6">
-          <div className="flex items-center gap-3 text-white mb-4">
-            <CheckCircle className="w-6 h-6" />
-            <span className="font-semibold">规划完成</span>
+      <div className="min-h-screen pb-28 animate-fade-in">
+        <header className="sticky top-0 z-30 px-6 pt-12 pb-5 bg-gradient-to-r from-primary to-accent shadow-sm">
+          <div className="flex items-center gap-2 text-primary-foreground/90 text-sm mb-2">
+            {generatedPlan.generationStatus === "error" ? (
+              <TriangleAlert className="w-4 h-4" />
+            ) : (
+              <CheckCircle className="w-4 h-4" />
+            )}
+            <span>
+              {generatedPlan.generationStatus === "success"
+                ? "路线生成完成"
+                : generatedPlan.generationStatus === "partial"
+                ? "部分路段为预估"
+                : "路线生成异常，已降级"}
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">
-            {settings.tripName || "北京精彩之旅"}
+          <h1 className="text-2xl font-bold text-primary-foreground">
+            {generatedPlan.name}
           </h1>
-          <p className="text-white/80">
-            为期{generatedPlan.days}天 · {selectedSpots.length}个地点
+          <p className="text-primary-foreground/80 text-sm mt-1">
+            {generatedPlan.totalDays ?? 0} 天 · {generatedPlan.totalSpots ?? 0} 个地点
           </p>
         </header>
 
-        <div className="px-6 -mt-4 space-y-4">
-          {/* 行程总览卡片 */}
-          <div className="bg-card rounded-2xl p-5 border border-border/50 shadow-lg">
-            <h2 className="font-bold text-foreground text-lg mb-4">行程总览</h2>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div className="text-center p-3 bg-secondary rounded-xl">
-                <div className="text-2xl font-bold text-primary">{attractionCount}</div>
-                <div className="text-xs text-muted-foreground mt-1">景点</div>
-              </div>
-              <div className="text-center p-3 bg-secondary rounded-xl">
-                <div className="text-2xl font-bold text-primary">{restaurantCount}</div>
-                <div className="text-xs text-muted-foreground mt-1">美食</div>
-              </div>
-              <div className="text-center p-3 bg-secondary rounded-xl">
-                <div className="text-2xl font-bold text-primary">{generatedPlan.days}</div>
-                <div className="text-xs text-muted-foreground mt-1">天</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-4 bg-accent/10 rounded-xl">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-accent" />
-                <span className="text-foreground font-medium">预估总花费</span>
-              </div>
-              <span className="text-xl font-bold text-primary">¥{generatedPlan.totalBudget}</span>
-            </div>
-          </div>
+        <div className="px-6 -mt-2 space-y-4">
+          <ItinerarySummary plan={generatedPlan} />
 
-          {/* 每日行程 */}
-          <div className="space-y-4">
-            <h2 className="font-bold text-foreground text-lg">每日行程</h2>
-            {generatedPlan.itinerary.map((day: any) => (
-              <div
-                key={day.day}
-                className="bg-card rounded-2xl p-5 border border-border/50"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold">
-                    {day.day}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-foreground">第{day.day}天</h3>
-                    <p className="text-sm text-muted-foreground">{day.theme}</p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {day.spots.map((spot: any, index: number) => (
-                    <div
-                      key={spot.id}
-                      className="flex items-center gap-3 p-3 bg-secondary/50 rounded-xl"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">
-                        {index + 1}
-                      </div>
-                      <img
-                        src={spot.image}
-                        alt={spot.name}
-                        className="w-12 h-12 rounded-lg object-cover"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-foreground truncate">{spot.name}</h4>
-                        <p className="text-xs text-muted-foreground">{spot.openTime}</p>
-                      </div>
-                      <span className="text-sm text-primary font-medium">
-                        {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* 贴心小贴士 */}
-          <div className="bg-accent/10 rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Lightbulb className="w-5 h-5 text-accent" />
-              <h2 className="font-bold text-foreground">贴心小贴士</h2>
-            </div>
-            <ul className="space-y-3">
-              {generatedPlan.tips.map((tip: string, index: number) => (
-                <li key={index} className="flex items-start gap-3 text-sm text-foreground">
-                  <span className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-bold flex-shrink-0 mt-0.5">
-                    {index + 1}
-                  </span>
-                  {tip}
-                </li>
+          {generatedPlan.generationNotices && generatedPlan.generationNotices.length > 0 && (
+            <section className={cn("rounded-2xl p-4 text-xs leading-6", statusToneClass)}>
+              {generatedPlan.generationNotices.map((notice, index) => (
+                <p key={`${notice}-${index}`}>• {notice}</p>
               ))}
-            </ul>
-          </div>
+            </section>
+          )}
 
-          {/* 操作按钮 */}
-          <div className="flex gap-3 pt-4">
+          {generatedPlan.days && generatedPlan.days.length > 0 ? (
+            <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 className="font-semibold text-foreground">当天地图路线</h3>
+                <span className="text-xs text-muted-foreground">
+                  与下方文字路线保持同顺序
+                </span>
+              </div>
+
+              <div className="flex gap-2 overflow-x-auto pb-1 mb-3">
+                {generatedPlan.days.map((day, index) => (
+                  <button
+                    key={day.day}
+                    type="button"
+                    onClick={() => setSelectedDayIndex(index)}
+                    className={cn(
+                      "shrink-0 px-3 py-1.5 rounded-full text-xs border transition-colors",
+                      selectedDayIndex === index
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary text-foreground border-transparent hover:bg-secondary/80"
+                    )}
+                  >
+                    第 {day.day} 天
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {modeOptions.map((option) => {
+                  const Icon = option.icon
+                  const active = mapMode === option.id
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setMapMode(option.id)
+                        setMapSummary((prev) => ({ ...prev, mode: option.id }))
+                      }}
+                      className={cn(
+                        "rounded-xl px-2 py-2 text-xs border transition-colors",
+                        active
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-secondary/70 text-foreground border-transparent"
+                      )}
+                    >
+                      <Icon className="w-4 h-4 mx-auto mb-1" />
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {selectedDay ? (
+                <>
+                  <MapView
+                    spots={selectedDay.spots}
+                    transportMode={mapMode}
+                    routeMode="trip"
+                    onSummaryChange={setMapSummary}
+                  />
+                  <div className="mt-3 rounded-xl bg-secondary/40 p-3 text-xs">
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>总距离：{mapSummary.distanceText}</span>
+                      <span>预计耗时：{mapSummary.durationText}</span>
+                    </div>
+                    <p className="mt-2 text-muted-foreground">{mapSummary.message}</p>
+                    {mapSummary.fallbackRouteUrl &&
+                      (mapSummary.status === "route-error" ||
+                        mapSummary.status === "map-error" ||
+                        mapSummary.status === "transit-degraded") && (
+                        <button
+                          type="button"
+                          onClick={() => openRouteInAmapWeb(mapSummary.fallbackRouteUrl || "")}
+                          className="mt-2 w-full py-2 rounded-lg bg-primary text-primary-foreground font-medium"
+                        >
+                          打开高德地图导航（兜底）
+                        </button>
+                      )}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl bg-secondary/40 p-4 text-sm text-muted-foreground">
+                  当前没有可展示的日程路线
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className="bg-card rounded-2xl border border-border/60 p-5 text-sm text-muted-foreground">
+              未生成任何可展示的每日行程，请返回重新规划。
+            </section>
+          )}
+
+          <section className="space-y-4">
+            <h2 className="text-lg font-semibold text-foreground">每日详细时间线</h2>
+            {(generatedPlan.days || []).map((day) => (
+              <DailyRouteCard key={day.day} day={day} />
+            ))}
+          </section>
+
+          <section className="flex gap-3 pt-2">
             <button
+              type="button"
               onClick={handleReset}
-              className="flex-1 py-4 bg-secondary text-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors btn-press flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-secondary text-foreground font-medium hover:bg-secondary/80 transition-colors flex items-center justify-center gap-2"
             >
-              <RotateCcw className="w-5 h-5" />
+              <RefreshCcw className="w-4 h-4" />
               重新规划
             </button>
             <button
+              type="button"
               onClick={handleSave}
-              className="flex-1 py-4 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium hover:opacity-90 transition-opacity btn-press flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
             >
-              <Save className="w-5 h-5" />
+              <Save className="w-4 h-4" />
               保存行程
             </button>
-          </div>
+          </section>
         </div>
 
-        {/* 保存成功提示 */}
         {showSaveSuccess && (
-          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 bg-foreground text-background px-6 py-3 rounded-xl shadow-lg animate-slide-in-up flex items-center gap-2">
-            <CheckCircle className="w-5 h-5" />
-            <span className="font-medium">行程已保存</span>
+          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 rounded-xl bg-foreground text-background px-5 py-2.5 text-sm shadow-lg">
+            已保存到我的行程
           </div>
         )}
       </div>
     )
   }
 
-  // 配置阶段
   return (
     <div className="min-h-screen pb-24 animate-fade-in">
-      {/* Header */}
       <header className="px-6 pt-12 pb-6">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
@@ -334,130 +396,160 @@ export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
           </div>
           <h1 className="text-2xl font-bold text-foreground">AI智能规划</h1>
         </div>
-        <p className="text-muted-foreground">设置您的旅行偏好</p>
+        <p className="text-muted-foreground">生成详细时间线与导航路线</p>
       </header>
 
-      <div className="px-6 space-y-6">
-        {/* 已选行程点预览 */}
-        <div className="bg-card rounded-2xl p-5 border border-border/50">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-bold text-foreground">已选行程点</h2>
+      <div className="px-6 space-y-5">
+        <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-foreground">已选景点</h2>
             <span className="text-sm text-primary font-medium">{selectedSpots.length} 个</span>
           </div>
-          <div className="flex -space-x-3 mb-4">
-            {selectedSpots.slice(0, 5).map((spot) => (
+          <div className="mt-3 flex -space-x-3">
+            {selectedSpots.slice(0, 6).map((spot) => (
               <img
                 key={spot.id}
                 src={spot.image}
                 alt={spot.name}
-                className="w-12 h-12 rounded-full border-3 border-card object-cover"
+                className="w-11 h-11 rounded-full border-2 border-card object-cover"
               />
             ))}
-            {selectedSpots.length > 5 && (
-              <div className="w-12 h-12 rounded-full bg-secondary border-3 border-card flex items-center justify-center text-sm font-bold text-muted-foreground">
-                +{selectedSpots.length - 5}
+            {selectedSpots.length > 6 && (
+              <div className="w-11 h-11 rounded-full border-2 border-card bg-secondary flex items-center justify-center text-xs font-semibold text-muted-foreground">
+                +{selectedSpots.length - 6}
               </div>
             )}
           </div>
+          <div className="mt-3 text-xs text-muted-foreground flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-primary" />
+            当前门票合计约 ¥{totalTicketPrice}
+          </div>
           <button
+            type="button"
             onClick={() => onNavigate("trips")}
-            className="text-sm text-primary font-medium hover:underline"
+            className="mt-3 text-sm text-primary font-medium inline-flex items-center gap-1"
           >
-            管理行程点
+            去管理行程点
+            <ChevronRight className="w-4 h-4" />
           </button>
-        </div>
+        </section>
 
-        {/* 行程名称 */}
-        <div className="space-y-3">
-          <label className="text-sm font-semibold text-foreground">行程名称</label>
+        <section className="space-y-3">
+          <label className="text-sm font-medium text-foreground">行程名称</label>
           <input
             type="text"
-            placeholder="例如：北京三日游"
+            placeholder="例如：北京三日路线"
             value={settings.tripName}
-            onChange={(e) => setSettings({ ...settings, tripName: e.target.value })}
-            className="w-full px-4 py-4 bg-secondary rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+            onChange={(event) =>
+              setSettings((prev) => ({ ...prev, tripName: event.target.value }))
+            }
+            className="w-full rounded-xl bg-secondary px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
-        </div>
+        </section>
 
-        {/* 日期选择 */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-foreground">开始日期</label>
+        <section className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">开始日期</label>
             <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="date"
                 value={settings.startDate}
-                onChange={(e) => setSettings({ ...settings, startDate: e.target.value })}
-                className="w-full pl-12 pr-4 py-4 bg-secondary rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                onChange={(event) =>
+                  setSettings((prev) => ({ ...prev, startDate: event.target.value }))
+                }
+                className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
           </div>
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-foreground">结束日期</label>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">结束日期</label>
             <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="date"
                 value={settings.endDate}
-                onChange={(e) => setSettings({ ...settings, endDate: e.target.value })}
-                className="w-full pl-12 pr-4 py-4 bg-secondary rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                onChange={(event) =>
+                  setSettings((prev) => ({ ...prev, endDate: event.target.value }))
+                }
+                className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* 出发地点 */}
-        <div className="space-y-3">
-          <label className="text-sm font-semibold text-foreground">出发地点</label>
+        <section className="space-y-2">
+          <label className="text-sm font-medium text-foreground">出发地/酒店</label>
           <div className="relative">
-            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="例如：上海"
+              placeholder="例如：北京饭店"
               value={settings.departure}
-              onChange={(e) => setSettings({ ...settings, departure: e.target.value })}
-              className="w-full pl-12 pr-4 py-4 bg-secondary rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              onChange={(event) =>
+                setSettings((prev) => ({ ...prev, departure: event.target.value }))
+              }
+              className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-        </div>
+        </section>
 
-        {/* 行程节奏 */}
-        <div className="space-y-3">
-          <label className="text-sm font-semibold text-foreground">行程节奏</label>
-          <div className="grid grid-cols-3 gap-3">
-            {paceOptions.map((pace) => (
+        <section className="space-y-2">
+          <label className="text-sm font-medium text-foreground">行程节奏</label>
+          <div className="grid grid-cols-3 gap-2">
+            {paceOptions.map((option) => (
               <button
-                key={pace.id}
-                onClick={() => setSettings({ ...settings, pace: pace.id })}
+                key={option.id}
+                type="button"
+                onClick={() => setSettings((prev) => ({ ...prev, pace: option.id }))}
                 className={cn(
-                  "p-4 rounded-xl border-2 transition-all btn-press text-center",
-                  settings.pace === pace.id
-                    ? "border-primary bg-primary/5"
-                    : "border-border bg-card hover:border-primary/30"
+                  "rounded-xl border px-2 py-3 text-xs transition-colors",
+                  settings.pace === option.id
+                    ? "bg-primary/10 text-primary border-primary/40"
+                    : "bg-card text-foreground border-border"
                 )}
               >
-                <div
-                  className={cn(
-                    "font-bold mb-1",
-                    settings.pace === pace.id ? "text-primary" : "text-foreground"
-                  )}
-                >
-                  {pace.label}
-                </div>
-                <div className="text-xs text-muted-foreground">{pace.desc}</div>
+                <p className="font-semibold">{option.label}</p>
+                <p className="text-[11px] mt-1 text-muted-foreground">{option.desc}</p>
               </button>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* 生成按钮 */}
+        <section className="space-y-2">
+          <label className="text-sm font-medium text-foreground">默认出行方式</label>
+          <div className="grid grid-cols-3 gap-2">
+            {modeOptions.map((option) => {
+              const Icon = option.icon
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() =>
+                    setSettings((prev) => ({ ...prev, transportMode: option.id }))
+                  }
+                  className={cn(
+                    "rounded-xl border px-2 py-2 text-xs transition-colors",
+                    settings.transportMode === option.id
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-secondary/70 text-foreground border-transparent"
+                  )}
+                >
+                  <Icon className="w-4 h-4 mx-auto mb-1" />
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
         <button
+          type="button"
           onClick={handleGenerate}
-          className="w-full py-4 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium hover:opacity-90 transition-opacity btn-press flex items-center justify-center gap-2 mt-4"
+          className="w-full py-4 rounded-xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-medium hover:opacity-90 transition-opacity btn-press flex items-center justify-center gap-2"
         >
           <Sparkles className="w-5 h-5" />
-          开始AI智能规划
+          生成详细行程路线
         </button>
       </div>
     </div>

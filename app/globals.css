@@ -284,3 +284,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* 隐藏高德默认定位按钮，统一使用业务自定义定位入口 */
+.amap-toolbar .amap-geolocation-con,
+.amap-controls .amap-geolocation-con {
+  display: none !important;
+}

@@ -9,10 +9,17 @@ import { TripsPage } from "@/components/travel/pages/trips-page"
 import { AIPlannnerPage } from "@/components/travel/pages/ai-planner-page"
 import { ProfilePage } from "@/components/travel/pages/profile-page"
 import { SpotDetailSheet } from "@/components/travel/spot-detail-sheet"
+import {
+  navigateToSpot,
+  type NavigateToSpotResult,
+  type SpotNavigationIntent,
+} from "@/lib/navigation"
 
 function TravelApp() {
   const [activeTab, setActiveTab] = useState<TabType>("home")
   const [selectedSpot, setSelectedSpot] = useState<Spot | null>(null)
+  const [navigationIntent, setNavigationIntent] =
+    useState<SpotNavigationIntent | null>(null)
   const { selectedSpots } = useTravel()
 
   const handleViewSpot = (spot: Spot) => {
@@ -21,6 +28,18 @@ function TravelApp() {
 
   const handleNavigate = (tab: "explore" | "trips" | "ai") => {
     setActiveTab(tab)
+  }
+
+  const handleNavigateToSpot = async (spot: Spot): Promise<NavigateToSpotResult> => {
+    const result = await navigateToSpot(spot, { mode: "driving" })
+    if (!result.ok || !result.intent) {
+      return result
+    }
+
+    setNavigationIntent(result.intent)
+    setActiveTab("trips")
+
+    return result
   }
 
   return (
@@ -34,7 +53,12 @@ function TravelApp() {
           <ExplorePage onViewSpot={handleViewSpot} />
         )}
         {activeTab === "trips" && (
-          <TripsPage onViewSpot={handleViewSpot} onNavigate={handleNavigate} />
+          <TripsPage
+            onViewSpot={handleViewSpot}
+            onNavigate={handleNavigate}
+            navigationIntent={navigationIntent}
+            onClearNavigationIntent={() => setNavigationIntent(null)}
+          />
         )}
         {activeTab === "ai" && (
           <AIPlannnerPage onNavigate={handleNavigate} />
@@ -52,7 +76,11 @@ function TravelApp() {
       />
 
       {/* Spot Detail Sheet */}
-      <SpotDetailSheet spot={selectedSpot} onClose={() => setSelectedSpot(null)} />
+      <SpotDetailSheet
+        spot={selectedSpot}
+        onClose={() => setSelectedSpot(null)}
+        onNavigateToSpot={handleNavigateToSpot}
+      />
     </div>
   )
 }

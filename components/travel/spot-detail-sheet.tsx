@@ -1,21 +1,54 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { X, MapPin, Star, Clock, Phone, Heart, Share2, Navigation } from "lucide-react"
 import { useTravel, Spot } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
+import type { NavigateToSpotResult } from "@/lib/navigation"
 
 interface SpotDetailSheetProps {
   spot: Spot | null
   onClose: () => void
+  onNavigateToSpot: (spot: Spot) => Promise<NavigateToSpotResult>
 }
 
-export function SpotDetailSheet({ spot, onClose }: SpotDetailSheetProps) {
+export function SpotDetailSheet({
+  spot,
+  onClose,
+  onNavigateToSpot,
+}: SpotDetailSheetProps) {
   const { addSpot, selectedSpots, favorites, toggleFavorite } = useTravel()
+  const [isNavigating, setIsNavigating] = useState(false)
+  const [navigationMessage, setNavigationMessage] = useState("")
 
   if (!spot) return null
 
   const isInTrip = selectedSpots.some((s) => s.id === spot.id)
   const isFavorite = favorites.includes(spot.id)
+  const navigationButtonText = useMemo(() => {
+    if (!isNavigating) return "导航前往"
+    return "正在规划路线..."
+  }, [isNavigating])
+
+  const handleNavigateToSpot = async () => {
+    if (isNavigating || !spot) return
+    setIsNavigating(true)
+    setNavigationMessage("正在获取当前位置并规划路线...")
+    try {
+      const result = await onNavigateToSpot(spot)
+      setNavigationMessage(result.message)
+      if (result.ok) {
+        onClose()
+      }
+    } finally {
+      setIsNavigating(false)
+    }
+  }
+
+  useEffect(() => {
+    setIsNavigating(false)
+    setNavigationMessage("")
+  }, [spot?.id])
 
   return (
     <div className="fixed inset-0 z-50 animate-fade-in" onClick={onClose}>
@@ -78,7 +111,7 @@ export function SpotDetailSheet({ spot, onClose }: SpotDetailSheetProps) {
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(85vh-14rem)] p-6 scrollbar-thin">
+        <div className="overflow-y-auto max-h-[calc(85vh-14.5rem)] p-6 pb-28 scrollbar-thin">
           {/* Title & Type */}
           <div className="mb-4">
             <div className="flex items-start justify-between gap-4">
@@ -144,35 +177,52 @@ export function SpotDetailSheet({ spot, onClose }: SpotDetailSheetProps) {
           {/* Map Preview */}
           <div className="mb-6">
             <h3 className="font-bold text-foreground mb-3">位置</h3>
-            <div className="relative h-40 bg-secondary rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={handleNavigateToSpot}
+              disabled={isNavigating}
+              className="relative h-40 w-full bg-secondary rounded-xl overflow-hidden border border-border/50 disabled:opacity-70"
+            >
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   <Navigation className="w-8 h-8 text-primary mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">点击查看地图导航</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isNavigating ? "正在规划路线..." : "点击查看地图导航"}
+                  </p>
                 </div>
               </div>
-            </div>
+            </button>
           </div>
         </div>
 
         {/* Bottom Actions */}
-        <div className="sticky bottom-0 p-4 bg-card border-t border-border flex gap-3">
-          <button className="flex-1 py-4 bg-secondary text-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors btn-press flex items-center justify-center gap-2">
+        <div className="sticky bottom-0 z-20 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] bg-card border-t border-border space-y-2 pointer-events-auto">
+          {navigationMessage && (
+            <p className="text-xs text-muted-foreground">{navigationMessage}</p>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleNavigateToSpot}
+              disabled={isNavigating}
+              className="flex-1 py-4 bg-secondary text-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors btn-press flex items-center justify-center gap-2 disabled:opacity-70"
+            >
             <Navigation className="w-5 h-5" />
-            导航前往
-          </button>
-          <button
-            onClick={() => addSpot(spot)}
-            disabled={isInTrip}
-            className={cn(
-              "flex-1 py-4 rounded-xl font-medium transition-all btn-press flex items-center justify-center gap-2",
-              isInTrip
-                ? "bg-muted text-muted-foreground cursor-default"
-                : "bg-primary text-primary-foreground hover:bg-primary/90"
-            )}
-          >
-            {isInTrip ? "已在行程中" : "加入我的行程"}
-          </button>
+              {navigationButtonText}
+            </button>
+            <button
+              onClick={() => addSpot(spot)}
+              disabled={isInTrip}
+              className={cn(
+                "flex-1 py-4 rounded-xl font-medium transition-all btn-press flex items-center justify-center gap-2",
+                isInTrip
+                  ? "bg-muted text-muted-foreground cursor-default"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90"
+              )}
+            >
+              {isInTrip ? "已在行程中" : "加入我的行程"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
