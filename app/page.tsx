@@ -15,18 +15,53 @@ import {
   type SpotNavigationIntent,
 } from "@/lib/navigation"
 
+type PlannerDestinationPayload = {
+  province: string
+  city: string
+  cityTagline?: string
+  tags?: string[]
+}
+
+type NavigateSource = "home-city" | "trips" | "direct"
+
+type NavigateOptions = {
+  destination?: PlannerDestinationPayload
+  source?: NavigateSource
+}
+
+type PlannerEntryDestination = PlannerDestinationPayload & {
+  source: NavigateSource
+  token: number
+}
+
 function TravelApp() {
   const [activeTab, setActiveTab] = useState<TabType>("home")
   const [selectedSpot, setSelectedSpot] = useState<Spot | null>(null)
   const [navigationIntent, setNavigationIntent] =
     useState<SpotNavigationIntent | null>(null)
-  const { selectedSpots } = useTravel()
+  const [plannerEntryDestination, setPlannerEntryDestination] =
+    useState<PlannerEntryDestination | null>(null)
+  const { selectedSpots, openPlan } = useTravel()
 
   const handleViewSpot = (spot: Spot) => {
     setSelectedSpot(spot)
   }
 
-  const handleNavigate = (tab: "explore" | "trips" | "ai") => {
+  const handleNavigate = (
+    tab: "explore" | "trips" | "ai",
+    options?: NavigateOptions
+  ) => {
+    if (tab === "ai") {
+      if (options?.destination) {
+        setPlannerEntryDestination({
+          ...options.destination,
+          source: options.source ?? "direct",
+          token: Date.now(),
+        })
+      } else {
+        setPlannerEntryDestination(null)
+      }
+    }
     setActiveTab(tab)
   }
 
@@ -42,9 +77,13 @@ function TravelApp() {
     return result
   }
 
+  const handleOpenSavedPlan = (planId: string) => {
+    openPlan(planId)
+    handleNavigate("ai", { source: "trips" })
+  }
+
   return (
-    <div className="min-h-screen bg-background max-w-lg mx-auto relative overflow-hidden shadow-2xl">
-      {/* Page Content */}
+    <div className="app-shell relative mx-auto min-h-screen max-w-[430px] overflow-hidden md:my-4 md:rounded-[32px]">
       <main className="min-h-screen">
         {activeTab === "home" && (
           <HomePage onNavigate={handleNavigate} onViewSpot={handleViewSpot} />
@@ -58,20 +97,31 @@ function TravelApp() {
             onNavigate={handleNavigate}
             navigationIntent={navigationIntent}
             onClearNavigationIntent={() => setNavigationIntent(null)}
+            onOpenSavedPlan={handleOpenSavedPlan}
           />
         )}
         {activeTab === "ai" && (
-          <AIPlannnerPage onNavigate={handleNavigate} />
+          <AIPlannnerPage
+            onNavigate={handleNavigate}
+            entryDestination={plannerEntryDestination}
+          />
         )}
         {activeTab === "profile" && (
-          <ProfilePage onViewSpot={handleViewSpot} />
+          <ProfilePage onViewSpot={handleViewSpot} onOpenSavedPlan={handleOpenSavedPlan} />
         )}
       </main>
 
       {/* Bottom Navigation */}
       <BottomNav
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={(tab) => {
+          if (tab === "ai") {
+            handleNavigate("ai")
+            return
+          }
+          setPlannerEntryDestination(null)
+          setActiveTab(tab)
+        }}
         tripCount={selectedSpots.length}
       />
 

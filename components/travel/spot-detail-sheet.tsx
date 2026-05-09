@@ -1,8 +1,21 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { X, MapPin, Star, Clock, Phone, Heart, Share2, Navigation } from "lucide-react"
-import { useTravel, Spot } from "@/lib/travel-context"
+import {
+  Clock,
+  Heart,
+  MapPin,
+  Navigation,
+  Phone,
+  Share2,
+  Star,
+  X,
+} from "lucide-react"
+import { AppButton } from "@/components/ui/app-button"
+import { AppCard } from "@/components/ui/app-card"
+import { AppTag } from "@/components/ui/app-tag"
+import { resolvePlaceImage } from "@/lib/place-image"
+import { useTravel, type Spot } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 import type { NavigateToSpotResult } from "@/lib/navigation"
 
@@ -21,14 +34,26 @@ export function SpotDetailSheet({
   const [isNavigating, setIsNavigating] = useState(false)
   const [navigationMessage, setNavigationMessage] = useState("")
 
-  if (!spot) return null
+  const spotId = spot?.id ?? ""
+  const isInTrip = useMemo(() => {
+    if (!spotId) return false
+    return selectedSpots.some((item) => item.id === spotId)
+  }, [selectedSpots, spotId])
 
-  const isInTrip = selectedSpots.some((s) => s.id === spot.id)
-  const isFavorite = favorites.includes(spot.id)
-  const navigationButtonText = useMemo(() => {
-    if (!isNavigating) return "导航前往"
-    return "正在规划路线..."
-  }, [isNavigating])
+  const isFavorite = useMemo(() => {
+    if (!spotId) return false
+    return favorites.includes(spotId)
+  }, [favorites, spotId])
+
+  const navigationButtonText = useMemo(
+    () => (isNavigating ? "正在规划路线..." : "导航前往"),
+    [isNavigating]
+  )
+
+  useEffect(() => {
+    setIsNavigating(false)
+    setNavigationMessage("")
+  }, [spotId])
 
   const handleNavigateToSpot = async () => {
     if (isNavigating || !spot) return
@@ -37,193 +62,193 @@ export function SpotDetailSheet({
     try {
       const result = await onNavigateToSpot(spot)
       setNavigationMessage(result.message)
-      if (result.ok) {
-        onClose()
-      }
+      if (result.ok) onClose()
     } finally {
       setIsNavigating(false)
     }
   }
 
-  useEffect(() => {
-    setIsNavigating(false)
-    setNavigationMessage("")
-  }, [spot?.id])
+  if (!spot) return null
 
   return (
     <div className="fixed inset-0 z-50 animate-fade-in" onClick={onClose}>
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/38" />
 
-      {/* Sheet */}
-      <div
-        className="absolute bottom-0 left-0 right-0 bg-card rounded-t-3xl max-h-[85vh] overflow-hidden animate-slide-in-up"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-2">
-          <div className="w-12 h-1.5 rounded-full bg-muted" />
-        </div>
-
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/20 text-white flex items-center justify-center hover:bg-black/30 transition-colors z-10"
+      <div className="pointer-events-none relative mx-auto flex h-full w-full max-w-lg items-end">
+        <section
+          className="pointer-events-auto animate-slide-in-up w-full overflow-hidden rounded-t-[1.8rem] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] shadow-[var(--app-shadow-lifted)]"
+          onClick={(event) => event.stopPropagation()}
         >
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Image */}
-        <div className="relative h-56">
-          <img
-            src={spot.image}
-            alt={spot.name}
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-
-          {/* Floating Actions */}
-          <div className="absolute top-4 left-4 flex gap-2">
-            <button
-              onClick={() => toggleFavorite(spot.id)}
-              className={cn(
-                "w-10 h-10 rounded-full flex items-center justify-center transition-colors",
-                isFavorite ? "bg-red-500 text-white" : "bg-white/90 text-foreground hover:bg-white"
-              )}
-            >
-              <Heart className={cn("w-5 h-5", isFavorite && "fill-current")} />
-            </button>
-            <button className="w-10 h-10 rounded-full bg-white/90 text-foreground flex items-center justify-center hover:bg-white transition-colors">
-              <Share2 className="w-5 h-5" />
-            </button>
+          <div className="flex justify-center pb-2 pt-3">
+            <div className="h-1.5 w-12 rounded-full bg-[var(--app-line-strong)]" />
           </div>
 
-          {/* Rating Badge */}
-          <div className="absolute bottom-4 left-4 flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-white/95 px-3 py-1.5 rounded-full">
-              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-              <span className="font-bold text-foreground">{spot.rating}</span>
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--app-surface-elevated)]/90 text-[var(--app-text-secondary)] transition-colors hover:bg-[var(--app-surface)]"
+            aria-label="close"
+          >
+            <X className="h-[1.125rem] w-[1.125rem]" />
+          </button>
+
+          <div className="relative h-56">
+            <img
+              src={resolvePlaceImage({
+                id: spot.id,
+                name: spot.name,
+                city: spot.city,
+                province: spot.province,
+                image: spot.image,
+                coverImage: spot.image,
+              })}
+              alt={spot.name}
+              className="h-full w-full object-cover"
+              onError={(event) => {
+                event.currentTarget.src = resolvePlaceImage({
+                  city: spot.city,
+                  province: spot.province,
+                  name: spot.name,
+                })
+              }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
+
+            <div className="absolute left-4 top-4 flex gap-2">
+              <button
+                onClick={() => toggleFavorite(spot.id)}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                  isFavorite
+                    ? "bg-[var(--app-error)] text-white"
+                    : "bg-white/92 text-[var(--app-text-primary)] hover:bg-white"
+                )}
+              >
+                <Heart className={cn("h-[1.125rem] w-[1.125rem]", isFavorite && "fill-current")} />
+              </button>
+              <button
+                onClick={() => setNavigationMessage("分享功能即将上线")}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/92 text-[var(--app-text-primary)] transition-colors hover:bg-white"
+              >
+                <Share2 className="h-[1.125rem] w-[1.125rem]" />
+              </button>
             </div>
-            <div className="px-3 py-1.5 bg-primary/90 text-primary-foreground rounded-full text-sm font-medium">
-              热度 {spot.heat}%
+
+            <div className="absolute bottom-4 left-4 flex items-center gap-2">
+              <div className="numeric flex items-center gap-1 rounded-full bg-white/94 px-3 py-1.5 text-sm text-[var(--app-text-strong)]">
+                <Star className="h-3.5 w-3.5 fill-[var(--app-gold)] text-[var(--app-gold)]" />
+                {spot.rating.toFixed(1)}
+              </div>
+              <div className="numeric rounded-full bg-[var(--app-brand)]/88 px-3 py-1.5 text-xs font-medium text-white">
+                热度 {spot.heat}%
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(85vh-14.5rem)] p-6 pb-28 scrollbar-thin">
-          {/* Title & Type */}
-          <div className="mb-4">
-            <div className="flex items-start justify-between gap-4">
-              <h1 className="text-2xl font-bold text-foreground">{spot.name}</h1>
-              <span className="text-xl font-bold text-primary whitespace-nowrap">
+          <div className="scrollbar-thin max-h-[calc(90vh-15rem)] overflow-y-auto px-5 pb-28 pt-5">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold text-[var(--app-text-strong)]">{spot.name}</h1>
+                <AppTag tone="brand" className="mt-2">
+                  {spot.type === "attraction" ? "景点" : spot.type === "restaurant" ? "美食" : "住宿"}
+                </AppTag>
+              </div>
+              <span className="numeric whitespace-nowrap text-xl font-semibold text-[var(--app-brand)]">
                 {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
               </span>
             </div>
-            <span className="inline-block mt-2 px-3 py-1 bg-secondary rounded-full text-sm font-medium text-foreground">
-              {spot.type === "attraction" ? "景点" : spot.type === "restaurant" ? "美食" : "住宿"}
-            </span>
-          </div>
 
-          {/* Tags */}
-          <div className="flex flex-wrap gap-2 mb-6">
-            {spot.tags.map((tag) => (
-              <span
-                key={tag}
-                className="px-3 py-1.5 bg-accent/20 text-accent-foreground rounded-lg text-sm font-medium"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-
-          {/* Info Cards */}
-          <div className="space-y-3 mb-6">
-            <div className="flex items-start gap-3 p-4 bg-secondary rounded-xl">
-              <MapPin className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">地址</p>
-                <p className="text-foreground">{spot.address}</p>
+            {spot.tags.length > 0 && (
+              <div className="mb-5 flex flex-wrap gap-1.5">
+                {spot.tags.map((tag) => (
+                  <AppTag key={tag}>{tag}</AppTag>
+                ))}
               </div>
+            )}
+
+            <div className="mb-5 space-y-2.5">
+              <AppCard tone="soft" padding="md" className="flex items-start gap-3">
+                <MapPin className="mt-0.5 h-[1.125rem] w-[1.125rem] flex-shrink-0 text-[var(--app-brand)]" />
+                <div>
+                  <p className="text-xs text-[var(--app-text-secondary)]">地址</p>
+                  <p className="mt-1 text-sm text-[var(--app-text-primary)]">{spot.address || "暂无地址"}</p>
+                </div>
+              </AppCard>
+
+              {spot.openTime && (
+                <AppCard tone="soft" padding="md" className="flex items-start gap-3">
+                  <Clock className="mt-0.5 h-[1.125rem] w-[1.125rem] flex-shrink-0 text-[var(--app-brand)]" />
+                  <div>
+                    <p className="text-xs text-[var(--app-text-secondary)]">营业时间</p>
+                    <p className="mt-1 text-sm text-[var(--app-text-primary)]">{spot.openTime}</p>
+                  </div>
+                </AppCard>
+              )}
+
+              {spot.phone && (
+                <AppCard tone="soft" padding="md" className="flex items-start gap-3">
+                  <Phone className="mt-0.5 h-[1.125rem] w-[1.125rem] flex-shrink-0 text-[var(--app-brand)]" />
+                  <div>
+                    <p className="text-xs text-[var(--app-text-secondary)]">联系电话</p>
+                    <p className="mt-1 text-sm text-[var(--app-text-primary)]">{spot.phone}</p>
+                  </div>
+                </AppCard>
+              )}
             </div>
 
-            {spot.openTime && (
-              <div className="flex items-start gap-3 p-4 bg-secondary rounded-xl">
-                <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">营业时间</p>
-                  <p className="text-foreground">{spot.openTime}</p>
+            <section className="mb-5">
+              <h3 className="text-sm font-semibold text-[var(--app-text-strong)]">地点简介</h3>
+              <p className="mt-2 text-sm leading-7 text-[var(--app-text-secondary)]">
+                {spot.description || "暂无简介"}
+              </p>
+            </section>
+
+            <section>
+              <h3 className="text-sm font-semibold text-[var(--app-text-strong)]">地图导航</h3>
+              <button
+                type="button"
+                onClick={handleNavigateToSpot}
+                disabled={isNavigating}
+                className="relative mt-2 h-32 w-full overflow-hidden rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface)] disabled:opacity-70"
+              >
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center">
+                    <Navigation className="mx-auto mb-2 h-7 w-7 text-[var(--app-brand)]" />
+                    <p className="text-sm text-[var(--app-text-secondary)]">
+                      {isNavigating ? "正在规划路线..." : "点击查看地图导航"}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </button>
+            </section>
+          </div>
+
+          <div className="pointer-events-auto sticky bottom-0 z-20 space-y-2 border-t border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-4 pb-[calc(env(safe-area-inset-bottom)+0.8rem)] pt-3">
+            {navigationMessage && (
+              <p className="text-xs text-[var(--app-text-secondary)]">{navigationMessage}</p>
             )}
-
-            {spot.phone && (
-              <div className="flex items-start gap-3 p-4 bg-secondary rounded-xl">
-                <Phone className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">联系电话</p>
-                  <p className="text-foreground">{spot.phone}</p>
-                </div>
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-2.5">
+              <AppButton
+                type="button"
+                variant="secondary"
+                size="lg"
+                onClick={handleNavigateToSpot}
+                disabled={isNavigating}
+              >
+                <Navigation className="h-[1.125rem] w-[1.125rem]" />
+                {navigationButtonText}
+              </AppButton>
+              <AppButton
+                type="button"
+                variant={isInTrip ? "secondary" : "primary"}
+                size="lg"
+                onClick={() => addSpot(spot)}
+                disabled={isInTrip}
+              >
+                {isInTrip ? "已在行程" : "加入行程"}
+              </AppButton>
+            </div>
           </div>
-
-          {/* Description */}
-          <div className="mb-6">
-            <h3 className="font-bold text-foreground mb-3">简介</h3>
-            <p className="text-muted-foreground leading-relaxed">{spot.description}</p>
-          </div>
-
-          {/* Map Preview */}
-          <div className="mb-6">
-            <h3 className="font-bold text-foreground mb-3">位置</h3>
-            <button
-              type="button"
-              onClick={handleNavigateToSpot}
-              disabled={isNavigating}
-              className="relative h-40 w-full bg-secondary rounded-xl overflow-hidden border border-border/50 disabled:opacity-70"
-            >
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <Navigation className="w-8 h-8 text-primary mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    {isNavigating ? "正在规划路线..." : "点击查看地图导航"}
-                  </p>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* Bottom Actions */}
-        <div className="sticky bottom-0 z-20 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] bg-card border-t border-border space-y-2 pointer-events-auto">
-          {navigationMessage && (
-            <p className="text-xs text-muted-foreground">{navigationMessage}</p>
-          )}
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={handleNavigateToSpot}
-              disabled={isNavigating}
-              className="flex-1 py-4 bg-secondary text-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors btn-press flex items-center justify-center gap-2 disabled:opacity-70"
-            >
-            <Navigation className="w-5 h-5" />
-              {navigationButtonText}
-            </button>
-            <button
-              onClick={() => addSpot(spot)}
-              disabled={isInTrip}
-              className={cn(
-                "flex-1 py-4 rounded-xl font-medium transition-all btn-press flex items-center justify-center gap-2",
-                isInTrip
-                  ? "bg-muted text-muted-foreground cursor-default"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90"
-              )}
-            >
-              {isInTrip ? "已在行程中" : "加入我的行程"}
-            </button>
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   )

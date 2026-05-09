@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-04-18T14:04:30.404Z",
+  "sourceFiles": {
+    "aLevel": "data\\raw\\中国A级景区数据.xls",
+    "detail": "data\\raw\\旅游景点(1).xlsx",
+    "reviews": "data\\raw\\总评论.csv",
+    "poiImages": null
+  },
+  "coverage": {
+    "aLevelRows": 11970,
+    "detailRows": 2443,
+    "reviewRows": 19496,
+    "poiCount": 13586,
+    "cityCount": 652,
+    "hotelCount": 24,
+    "reviewCount": 19496,
+    "imageBindingCount": 13586,
+    "clientPoiCount": 1800
+  }
+}

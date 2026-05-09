@@ -1,0 +1,150 @@
+{
+  "generatedAt": "2026-04-18T14:04:30.262Z",
+  "totalReviews": 19496,
+  "tagStats": [
+    {
+      "tag": "适合亲子",
+      "count": 113672,
+      "ratio": 0.2381
+    },
+    {
+      "tag": "干净卫生",
+      "count": 82105,
+      "ratio": 0.172
+    },
+    {
+      "tag": "商务友好",
+      "count": 78414,
+      "ratio": 0.1643
+    },
+    {
+      "tag": "餐饮方便",
+      "count": 64279,
+      "ratio": 0.1347
+    },
+    {
+      "tag": "交通便利",
+      "count": 59953,
+      "ratio": 0.1256
+    },
+    {
+      "tag": "服务好",
+      "count": 45584,
+      "ratio": 0.0955
+    },
+    {
+      "tag": "安静",
+      "count": 14441,
+      "ratio": 0.0303
+    },
+    {
+      "tag": "位置中心",
+      "count": 11200,
+      "ratio": 0.0235
+    },
+    {
+      "tag": "适合度假",
+      "count": 6753,
+      "ratio": 0.0141
+    },
+    {
+      "tag": "适合老人",
+      "count": 973,
+      "ratio": 0.002
+    }
+  ],
+  "purposeStats": [
+    {
+      "purpose": "家庭亲子",
+      "count": 112548,
+      "avgUserScore": 4.59,
+      "avgHotelScore": 4.47,
+      "avgHotelPrice": 1205.6,
+      "topTags": [
+        "适合亲子",
+        "干净卫生",
+        "餐饮方便"
+      ]
+    },
+    {
+      "purpose": "商务出差",
+      "count": 76836,
+      "avgUserScore": 4.53,
+      "avgHotelScore": 4.4,
+      "avgHotelPrice": 1125.23,
+      "topTags": [
+        "商务友好",
+        "干净卫生",
+        "餐饮方便"
+      ]
+    },
+    {
+      "purpose": "朋友出游",
+      "count": 58316,
+      "avgUserScore": 4.62,
+      "avgHotelScore": 4.46,
+      "avgHotelPrice": 1084.49,
+      "topTags": [
+        "干净卫生",
+        "交通便利",
+        "餐饮方便"
+      ]
+    },
+    {
+      "purpose": "情侣出游",
+      "count": 36844,
+      "avgUserScore": 4.57,
+      "avgHotelScore": 4.47,
+      "avgHotelPrice": 1115.38,
+      "topTags": [
+        "干净卫生",
+        "餐饮方便",
+        "交通便利"
+      ]
+    },
+    {
+      "purpose": "独自旅行",
+      "count": 27298,
+      "avgUserScore": 4.46,
+      "avgHotelScore": 4.4,
+      "avgHotelPrice": 1063.64,
+      "topTags": [
+        "干净卫生",
+        "交通便利",
+        "餐饮方便"
+      ]
+    },
+    {
+      "purpose": "其他",
+      "count": 8654,
+      "avgUserScore": 4.32,
+      "avgHotelScore": 4.45,
+      "avgHotelPrice": 1199.7,
+      "topTags": [
+        "干净卫生",
+        "交通便利",
+        "餐饮方便"
+      ]
+    },
+    {
+      "purpose": "代人预订",
+      "count": 3390,
+      "avgUserScore": 4.73,
+      "avgHotelScore": 4.38,
+      "avgHotelPrice": 1100.8,
+      "topTags": [
+        "干净卫生",
+        "交通便利",
+        "餐饮方便"
+      ]
+    }
+  ],
+  "recommendationTags": [
+    "适合亲子",
+    "干净卫生",
+    "商务友好",
+    "餐饮方便",
+    "交通便利",
+    "服务好"
+  ]
+}

@@ -1,54 +1,83 @@
-"use client"
+﻿"use client"
 
-import { MapPin, Route, Wallet } from "lucide-react"
-import { formatDistance, formatDuration } from "@/lib/amap-spot-utils"
+import { CalendarDays, Compass, MapPin, Sparkles } from "lucide-react"
 import type { TripPlan } from "@/lib/travel-context"
 
 interface ItinerarySummaryProps {
   plan: TripPlan
 }
 
+function buildStyleTags(plan: TripPlan) {
+  const interests = plan.requirement?.interests || []
+  const pace = plan.requirement?.pace
+  const needs = plan.requirement?.specialNeeds || []
+  const tags = [...interests.slice(0, 2)]
+
+  if (pace === "fast") tags.push("特种兵式")
+  if (pace === "slow") tags.push("慢节奏")
+  if (!pace || pace === "balanced") tags.push("轻松适中")
+
+  if (needs.includes("公共交通优先")) tags.push("公共交通优先")
+  else if (needs.includes("自驾优先")) tags.push("自驾优先")
+
+  return Array.from(new Set(tags)).slice(0, 4)
+}
+
+function buildRouteSentence(plan: TripPlan) {
+  const explanation = plan.planExplanations?.[0]
+  if (explanation) return explanation
+
+  const interests = plan.requirement?.interests || []
+  if (interests.includes("历史人文") && interests.includes("美食打卡")) {
+    return "以中轴线文化体验为主，兼顾夜间美食与舒适住宿。"
+  }
+  if (interests.includes("自然风光")) {
+    return "围绕顺路片区展开自然与城市节奏并重的日程。"
+  }
+  return "聚焦经典北京与顺路餐饮安排，减少折返，提升旅行从容度。"
+}
+
 export function ItinerarySummary({ plan }: ItinerarySummaryProps) {
+  const tags = buildStyleTags(plan)
+  const routeSentence = buildRouteSentence(plan)
+
   return (
-    <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-      <h2 className="text-base font-semibold text-foreground mb-3">行程总览</h2>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded-xl bg-secondary/60 px-3 py-2 text-center">
-          <p className="text-muted-foreground">总天数</p>
-          <p className="text-lg font-semibold text-foreground mt-1">{plan.totalDays ?? 0}</p>
+    <section className="relative overflow-hidden rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-5 shadow-[var(--app-shadow-soft)]">
+      <div className="pointer-events-none absolute -right-16 -top-14 h-40 w-40 rounded-full bg-[color:rgba(93,111,47,0.1)] blur-3xl" />
+      <div className="relative">
+        <p className="text-[11px] tracking-[0.08em] text-[var(--app-text-secondary)]">TRAVEL HANDBOOK</p>
+        <h2 className="mt-2 text-[1.5rem] font-semibold tracking-[0.01em] text-[var(--app-text-strong)]">{plan.name}</h2>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-surface)] px-2.5 py-1 text-[var(--app-text-secondary)]">
+            <MapPin className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+            {plan.requirement?.city || "北京"}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-surface)] px-2.5 py-1 text-[var(--app-text-secondary)]">
+            <CalendarDays className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+            {plan.totalDays || 0} 天
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-surface)] px-2.5 py-1 text-[var(--app-text-secondary)]">
+            <Compass className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+            {plan.pace}
+          </span>
         </div>
-        <div className="rounded-xl bg-secondary/60 px-3 py-2 text-center">
-          <p className="text-muted-foreground">总景点数</p>
-          <p className="text-lg font-semibold text-foreground mt-1">{plan.totalSpots ?? plan.spots.length}</p>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <span key={tag} className="rounded-full bg-[var(--app-brand-soft)] px-2.5 py-1 text-[11px] text-[var(--app-brand)]">
+              {tag}
+            </span>
+          ))}
         </div>
-        <div className="rounded-xl bg-secondary/60 px-3 py-2 text-center">
-          <p className="text-muted-foreground">总预算</p>
-          <p className="text-lg font-semibold text-foreground mt-1">¥{plan.totalEstimatedCost ?? 0}</p>
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-xl bg-secondary/40 px-3 py-2">
-          <p className="text-muted-foreground inline-flex items-center gap-1.5">
-            <Route className="w-3.5 h-3.5 text-primary" />
-            总交通时长
-          </p>
-          <p className="font-semibold text-foreground mt-1">
-            {formatDuration(plan.totalTravelSeconds ?? 0)}
-          </p>
-        </div>
-        <div className="rounded-xl bg-secondary/40 px-3 py-2">
-          <p className="text-muted-foreground inline-flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5 text-primary" />
-            总距离
-          </p>
-          <p className="font-semibold text-foreground mt-1">
-            {formatDistance(plan.totalDistanceMeters ?? 0)}
-          </p>
-        </div>
-      </div>
-      <div className="mt-2 rounded-xl bg-secondary/20 px-3 py-2 text-xs text-muted-foreground inline-flex items-center gap-1.5">
-        <Wallet className="w-3.5 h-3.5 text-primary" />
-        总游玩时长 {Math.round(plan.totalPlayMinutes ?? 0)} 分钟
+
+        <p className="mt-4 rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-sm leading-6 text-[var(--app-text-secondary)]">
+          <span className="inline-flex items-center gap-1.5 font-medium text-[var(--app-text-primary)]">
+            <Sparkles className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+            路线摘要
+          </span>
+          <span className="ml-1">{routeSentence}</span>
+        </p>
       </div>
     </section>
   )

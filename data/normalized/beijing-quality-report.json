@@ -1,0 +1,113 @@
+{
+  "generatedAt": "2026-04-18T14:51:11.482Z",
+  "selection": {
+    "top": 100,
+    "selectedCount": 100,
+    "source": "data\\normalized\\pois.json",
+    "city": "北京",
+    "category": "attraction"
+  },
+  "image": {
+    "exact": 0,
+    "cityRelated": 100,
+    "fallback": 0,
+    "nonFallbackRatio": 1,
+    "samplesFallback": []
+  },
+  "nearby": {
+    "status": "ok",
+    "evaluated": 100,
+    "passCount": 34,
+    "passRatio": 0.34,
+    "avgFoodCount": 9.82,
+    "avgHotelCount": 10.87,
+    "foodRadius": 2000,
+    "hotelRadius": 3000,
+    "samplesFailed": [
+      {
+        "placeId": "poi-1pf9ge3",
+        "placeName": "故宫",
+        "foodCount": 20,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-jjxtyf",
+        "placeName": "颐和园",
+        "foodCount": 0,
+        "hotelCount": 20,
+        "pass": false
+      },
+      {
+        "placeId": "poi-4ablxy",
+        "placeName": "八达岭长城",
+        "foodCount": 4,
+        "hotelCount": 19,
+        "pass": false
+      },
+      {
+        "placeId": "poi-61gjuk",
+        "placeName": "北京野生动物园",
+        "foodCount": 20,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-fc63hm",
+        "placeName": "天坛公园",
+        "foodCount": 20,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-1ngjvbp",
+        "placeName": "北京动物园",
+        "foodCount": 0,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-e9ydk5",
+        "placeName": "鸟巢",
+        "foodCount": 20,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-11lto13",
+        "placeName": "中国国家博物馆",
+        "foodCount": 0,
+        "hotelCount": 20,
+        "pass": false
+      },
+      {
+        "placeId": "poi-11uc2i5",
+        "placeName": "玉渊潭公园",
+        "foodCount": 20,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-1hy9b8f",
+        "placeName": "天安门广场",
+        "foodCount": 0,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-11y7kb6",
+        "placeName": "北京海洋馆",
+        "foodCount": 0,
+        "hotelCount": 0,
+        "pass": false
+      },
+      {
+        "placeId": "poi-13aox7o",
+        "placeName": "慕田峪长城",
+        "foodCount": 17,
+        "hotelCount": 0,
+        "pass": false
+      }
+    ]
+  }
+}

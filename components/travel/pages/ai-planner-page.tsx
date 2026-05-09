@@ -1,557 +1,2066 @@
-"use client"
+﻿"use client"
 
-import { useEffect, useMemo, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Bus,
-  Calendar,
-  Car,
-  CheckCircle,
-  ChevronRight,
-  Clock,
-  Footprints,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Edit3,
   Loader2,
-  MapPin,
+  MessageSquarePlus,
   RefreshCcw,
   Save,
+  Share2,
   Sparkles,
-  TriangleAlert,
 } from "lucide-react"
-import { MapView, RouteSummaryInfo, TransportMode } from "@/components/travel/map-view"
+import { AppButton } from "@/components/ui/app-button"
+import { AppCard } from "@/components/ui/app-card"
+import { AppInput } from "@/components/ui/app-input"
+import { AppTag } from "@/components/ui/app-tag"
+import { CityPicker } from "@/components/travel/city-picker"
 import { DailyRouteCard } from "@/components/travel/daily-route-card"
+import { DayRouteMap } from "@/components/travel/day-route-map"
 import { ItinerarySummary } from "@/components/travel/itinerary-summary"
+import { ResultDayHeader } from "@/components/travel/result-day-header"
+import { ResultBudgetSummary } from "@/components/travel/result-budget-summary"
+import { ResultDiagnosticsPanel } from "@/components/travel/result-diagnostics-panel"
+import { PlannerConflictDialog } from "@/components/travel/planner-conflict-dialog"
+import { PlannerDateFields } from "@/components/travel/planner-date-fields"
+import { PlannerStepper } from "@/components/travel/planner-stepper"
+import { PlannerSummaryBar } from "@/components/travel/planner-summary-bar"
+import { PoiCart } from "@/components/travel/poi-cart"
+import { ReplaceFoodSheet } from "@/components/travel/replace-food-sheet"
+import { ReplaceHotelSheet } from "@/components/travel/replace-hotel-sheet"
+import { ReplacePlaceSheet } from "@/components/travel/replace-place-sheet"
+import { RecommendedBundles } from "@/components/travel/recommended-bundles"
+import { RecommendedPoiSection } from "@/components/travel/recommended-poi-section"
+import { RequirementPicker } from "@/components/travel/requirement-picker"
+import { MobileSheet } from "@/components/travel/mobile-sheet"
+import { getHotelRecommendations } from "@/lib/normalized-data"
+import { getCitiesByProvince, RECOMMENDED_CITY_GROUPS } from "@/lib/planner-city-data"
+import {
+  detectCityConflict,
+  filterSpotsByCity,
+  findProvinceByCity,
+  inferMajorityCity,
+  isSpotInDestination,
+} from "@/lib/planner-city-guard"
+import {
+  getRecommendedBundles,
+  getRecommendedPoisByRequirement,
+} from "@/lib/planner-recommendations"
+import type { RouteLegResult } from "@/lib/amap-route-utils"
+import type {
+  GeneratedPlanDay,
+  PlanFeedbackSentiment,
+  PlanFeedbackTag,
+  PlannerCandidate,
+  PlannerDecisionRequest,
+  PlannerDecisionResult,
+  SelectedPoiItem,
+  TravelRequirement,
+} from "@/lib/planner-types"
+import { createPlanFeedbackRecord, deriveFeedbackActions } from "@/lib/plan-feedback"
+import {
+  applyDayPatch,
+  getHotelReplacementCandidates,
+  getMealReplacementCandidates,
+  getSpotReplacementCandidates,
+  moveSpotIdInMatrix,
+  replaceSpotIdInMatrix,
+  toDaySpotIdMatrix,
+  toSuggestionFromSpot,
+  toggleLockedSpot,
+  updateDayHotel,
+  updateDayMeal,
+  type PlanReplaceCandidate,
+} from "@/lib/plan-editor"
+import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
+import { calculatePlanQualityScore } from "@/lib/plan-quality-score"
+import { validatePlan } from "@/lib/plan-validator"
 import { buildAiItinerary } from "@/lib/route-planner"
-import { openRouteInAmapWeb } from "@/lib/open-map-route"
-import { useTravel, type TripPlan } from "@/lib/travel-context"
+import { resolvePlaceImage } from "@/lib/place-image"
+import {
+  type DaySuggestionItem,
+  sampleSpots,
+  type ItineraryDay,
+  type RouteTransportMode,
+  type Spot,
+  type TripPlan,
+  useTravel,
+} from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
 interface AIPlannnerPageProps {
-  onNavigate: (tab: "explore" | "trips") => void
+  onNavigate: (
+    tab: "explore" | "trips" | "ai",
+    options?: {
+      destination?: {
+        province: string
+        city: string
+        cityTagline?: string
+        tags?: string[]
+      }
+      source?: "home-city" | "trips" | "direct"
+    }
+  ) => void
+  entryDestination?: {
+    province: string
+    city: string
+    cityTagline?: string
+    tags?: string[]
+    source: "home-city" | "trips" | "direct"
+    token: number
+  } | null
 }
 
-const paceOptions = [
-  { id: "relaxed", label: "轻松", desc: "每天 2-3 个地点" },
-  { id: "moderate", label: "适中", desc: "每天 3-4 个地点" },
-  { id: "intensive", label: "紧凑", desc: "每天 4-5 个地点" },
-] as const
+const STEP_TITLES = ["目的地", "偏好", "预算", "完成", "结果"]
+const DEFAULT_PROVINCE = RECOMMENDED_CITY_GROUPS[0]?.province ?? ""
+const DEFAULT_CITY = getCitiesByProvince(DEFAULT_PROVINCE)[0]
 
-const modeOptions: Array<{
-  id: TransportMode
-  label: string
-  icon: ComponentType<{ className?: string }>
-}> = [
-  { id: "driving", label: "驾车", icon: Car },
-  { id: "walking", label: "步行", icon: Footprints },
-  { id: "transit", label: "公交", icon: Bus },
-]
+const DEFAULT_REQUIREMENT: TravelRequirement = {
+  province: DEFAULT_PROVINCE,
+  city: DEFAULT_CITY?.city ?? "",
+  cityTagline: DEFAULT_CITY?.tagline ?? "",
+  days: 3,
+  budgetRange: "3000-5000",
+  companions: "friends",
+  interests: ["历史人文", "美食打卡"],
+  pace: "balanced",
+  specialNeeds: [],
+}
 
-function createInitialMapSummary(mode: TransportMode): RouteSummaryInfo {
+const COMPANION_LABEL: Record<TravelRequirement["companions"], string> = {
+  solo: "一个人",
+  couple: "情侣",
+  friends: "朋友",
+  family: "家庭亲子",
+  elderly: "老人同行",
+  team: "公司团建",
+}
+
+function toEnginePace(pace: TravelRequirement["pace"]) {
+  if (pace === "fast") return "intensive"
+  if (pace === "slow") return "relaxed"
+  return "moderate"
+}
+
+function toPaceLabel(pace: TravelRequirement["pace"]) {
+  if (pace === "fast") return "特种兵式"
+  if (pace === "slow") return "慢节奏放松"
+  return "轻松适中"
+}
+
+function uniqueSpots(spots: Spot[]) {
+  const bucket = new Map<string, Spot>()
+  for (const spot of spots) {
+    if (!bucket.has(spot.id)) bucket.set(spot.id, spot)
+  }
+  return Array.from(bucket.values())
+}
+
+function mapSpotType(type: Spot["type"]): SelectedPoiItem["type"] {
+  if (type === "restaurant") return "food"
+  if (type === "hotel") return "hotel"
+  return "spot"
+}
+
+function toSelectedPoiSnapshot(spot: Spot): SelectedPoiItem {
   return {
-    mode,
-    status: "idle",
-    distance: 0,
-    duration: 0,
-    distanceText: "--",
-    durationText: "--",
-    startName: "--",
-    endName: "--",
-    waypointCount: 0,
-    resolvedCount: 0,
-    message: "请选择当天行程后查看路线",
-    partialErrors: [],
-    fallbackRouteUrl: "",
+    id: spot.id,
+    name: spot.name,
+    type: mapSpotType(spot.type),
+    district: spot.district,
+    city: spot.city,
+    lng: typeof spot.lng === "number" ? spot.lng : undefined,
+    lat: typeof spot.lat === "number" ? spot.lat : undefined,
+    estimatedVisitMinutes: spot.suggestedDurationMinutes,
+    price: spot.ticketPrice,
+    openingHours: spot.openTime,
+    address: spot.address,
   }
 }
 
-export function AIPlannnerPage({ onNavigate }: AIPlannnerPageProps) {
-  const { selectedSpots, savePlan } = useTravel()
-  const [step, setStep] = useState<"config" | "generating" | "result">("config")
-  const [settings, setSettings] = useState({
-    startDate: "",
-    endDate: "",
-    pace: "moderate",
-    departure: "",
-    tripName: "",
-    transportMode: "driving" as TransportMode,
+function toPlannerCandidate(spot: Spot): PlannerCandidate {
+  const rating = Number(spot.rating)
+  const price = Number(spot.ticketPrice)
+  const lng = Number(spot.lng)
+  const lat = Number(spot.lat)
+  return {
+    placeId: spot.id,
+    name: spot.name,
+    type: spot.type === "attraction" ? "attraction" : spot.type === "hotel" ? "hotel" : "restaurant",
+    city: spot.city || "北京",
+    district: spot.district,
+    address: spot.address,
+    rating: Number.isFinite(rating) && rating > 0 ? rating : undefined,
+    price: Number.isFinite(price) && price > 0 ? price : undefined,
+    tags: spot.tags,
+    lng: Number.isFinite(lng) ? lng : undefined,
+    lat: Number.isFinite(lat) ? lat : undefined,
+    openTime: spot.openTime,
+    source: spot.source,
+    stayMinutes: spot.suggestedDurationMinutes,
+  }
+}
+
+function getDistanceMeters(a: Spot, b: Spot) {
+  const lng1 = Number(a.lng)
+  const lat1 = Number(a.lat)
+  const lng2 = Number(b.lng)
+  const lat2 = Number(b.lat)
+  if (![lng1, lat1, lng2, lat2].every((value) => Number.isFinite(value))) {
+    return Number.POSITIVE_INFINITY
+  }
+  const toRad = (value: number) => (value * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const rLat1 = toRad(lat1)
+  const rLat2 = toRad(lat2)
+  const k =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(rLat1) * Math.cos(rLat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return Math.max(0, 6371000 * 2 * Math.atan2(Math.sqrt(k), Math.sqrt(1 - k)))
+}
+
+function buildPlannerRouteHints(attractions: Spot[]) {
+  const hints: PlannerDecisionRequest["routeHints"] = []
+  for (let i = 0; i < attractions.length; i += 1) {
+    for (let j = i + 1; j < attractions.length; j += 1) {
+      const from = attractions[i]
+      const to = attractions[j]
+      const distance = getDistanceMeters(from, to)
+      if (!Number.isFinite(distance) || distance <= 0 || distance > 45000) continue
+      const durationSeconds = Math.round(distance / 13.5)
+      hints.push({
+        fromPlaceId: from.id,
+        toPlaceId: to.id,
+        distanceMeters: Math.round(distance),
+        durationSeconds: Math.max(180, durationSeconds),
+        mode: "transit",
+      })
+    }
+  }
+  return hints.slice(0, 180)
+}
+
+function toSuggestionItemFromSpot(
+  spot: Spot | undefined,
+  type: DaySuggestionItem["type"],
+  reason?: string
+): DaySuggestionItem | null {
+  if (!spot) return null
+  const rating = Number(spot.rating)
+  const price = Number(spot.ticketPrice)
+  return {
+    id: `${type}-${spot.id}`,
+    name: spot.name,
+    type,
+    address: spot.address || `${spot.city || "北京"}${spot.name}`,
+    price:
+      Number.isFinite(price) && price > 0
+        ? Math.round(price)
+        : type === "hotel"
+        ? 380
+        : 88,
+    rating: Number.isFinite(rating) && rating > 0 ? rating : 4.5,
+    image: spot.image,
+    reason: reason || "基于候选与偏好决策",
+    tags: spot.tags,
+  }
+}
+
+function applyStructuredSuggestions(
+  days: ItineraryDay[],
+  generatedDays: GeneratedPlanDay[] | undefined,
+  restaurantMap: Map<string, Spot>,
+  hotelMap: Map<string, Spot>
+) {
+  if (!generatedDays || generatedDays.length === 0) return days
+  const byDay = new Map(generatedDays.map((day) => [day.day, day]))
+
+  return days.map((day) => {
+    const generated = byDay.get(day.day)
+    if (!generated) return day
+
+    const lunchCandidate = generated.lunch?.placeId
+      ? toSuggestionItemFromSpot(
+          restaurantMap.get(generated.lunch.placeId),
+          "food",
+          generated.lunch.reason
+        )
+      : null
+    const dinnerCandidate = generated.dinner?.placeId
+      ? toSuggestionItemFromSpot(
+          restaurantMap.get(generated.dinner.placeId),
+          "food",
+          generated.dinner.reason
+        )
+      : null
+    const hotelCandidate = generated.hotel?.placeId
+      ? toSuggestionItemFromSpot(
+          hotelMap.get(generated.hotel.placeId),
+          "hotel",
+          generated.hotel.reason
+        )
+      : null
+
+    const lunch = lunchCandidate || day.lunchSuggestion || null
+    const dinner = dinnerCandidate || day.dinnerSuggestion || null
+    const hotel = hotelCandidate || day.hotelSuggestion || null
+
+    const mealCost = (lunch?.price || 0) + (dinner?.price || 0)
+    const hotelCost = hotel?.price || 0
+    const ticketCost = day.spots.reduce((sum, spot) => sum + (spot.ticketPrice || 0), 0)
+    const warnings = Array.from(new Set([...(day.warnings || []), ...(generated.warnings || [])]))
+
+    return {
+      ...day,
+      theme: generated.theme || day.theme,
+      districtSummary: generated.districtSummary || day.districtSummary,
+      lunchSuggestion: lunch,
+      dinnerSuggestion: dinner,
+      hotelSuggestion: hotel,
+      totalMealCost: mealCost,
+      totalHotelCost: hotelCost,
+      totalEstimatedCost: ticketCost + mealCost + hotelCost,
+      warnings,
+    }
   })
-  const [generatedPlan, setGeneratedPlan] = useState<TripPlan | null>(null)
-  const [selectedDayIndex, setSelectedDayIndex] = useState(0)
-  const [mapMode, setMapMode] = useState<TransportMode>("driving")
-  const [mapSummary, setMapSummary] = useState<RouteSummaryInfo>(
-    createInitialMapSummary("driving")
+}
+
+async function requestPlannerDecision(payload: PlannerDecisionRequest): Promise<PlannerDecisionResult> {
+  const response = await fetch("/api/planner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  const result = (await response.json()) as {
+    ok: boolean
+    data?: PlannerDecisionResult
+    message?: string
+  }
+  if (!response.ok || !result.ok || !result.data) {
+    throw new Error(result.message || "规划决策请求失败")
+  }
+  return result.data
+}
+
+function addDays(startDate: string, days: number) {
+  if (!startDate) return ""
+  const date = new Date(startDate)
+  if (Number.isNaN(date.getTime())) return ""
+  date.setDate(date.getDate() + Math.max(0, days - 1))
+  return date.toISOString().slice(0, 10)
+}
+
+function buildDisplayRouteLegsForDay(
+  day: ItineraryDay,
+  mode: RouteTransportMode,
+  legs: RouteLegResult[]
+): ItineraryDay["routeLegs"] {
+  if (legs.length === 0) return []
+
+  const pairMap = new Map(
+    day.routeLegs.map((leg) => [`${leg.fromName}__${leg.toName}`, leg] as const)
   )
+
+  return legs.map((leg, index) => {
+    const matched =
+      pairMap.get(`${leg.fromName}__${leg.toName}`) || day.routeLegs[index] || null
+    const fallbackStart =
+      index === 0
+        ? day.spots[0]?.leaveTime || day.spots[0]?.arrivalTime || day.startTime
+        : day.spots[index]?.leaveTime || matched?.startTime || day.startTime
+    const fallbackArrival =
+      day.spots[index + 1]?.arrivalTime || matched?.arrivalTime || day.endTime
+
+    return {
+      id: matched?.id || `map-${day.day}-${index}-${leg.fromName}-${leg.toName}`,
+      fromName: leg.fromName,
+      toName: leg.toName,
+      transportMode: mode,
+      distanceMeters: leg.distanceMeters,
+      durationSeconds: leg.durationSeconds,
+      startTime: matched?.startTime || fallbackStart,
+      arrivalTime: matched?.arrivalTime || fallbackArrival,
+      readableDistance: leg.readableDistance,
+      readableDuration: leg.readableDuration,
+      isEstimated: leg.isEstimated || leg.status !== "success",
+      estimateReason: leg.message || matched?.estimateReason,
+      transitLineSummary: leg.transitLineSummary,
+      transitTransferCount: leg.transitTransferCount,
+      transitSteps: leg.transitSteps,
+      recommendedMode: mode === "transit" ? undefined : matched?.recommendedMode,
+      recommendedReason: mode === "transit" ? undefined : matched?.recommendedReason,
+    }
+  })
+}
+
+function validateDates(startDate: string, endDate: string) {
+  if (!startDate || !endDate) return ""
+  if (endDate < startDate) return "结束日期不能早于出发日期"
+  return ""
+}
+
+function initialRequirementFromSpots(spots: Spot[]) {
+  const majorityCity = inferMajorityCity(spots)
+  if (!majorityCity) return DEFAULT_REQUIREMENT
+  const cityConfig = findProvinceByCity(majorityCity)
+  if (!cityConfig) {
+    return {
+      ...DEFAULT_REQUIREMENT,
+      city: majorityCity,
+    }
+  }
+  return {
+    ...DEFAULT_REQUIREMENT,
+    province: cityConfig.province,
+    city: cityConfig.city,
+    cityTagline: cityConfig.tagline,
+  }
+}
+
+function buildRequirementFromEntryDestination(
+  destination: NonNullable<AIPlannnerPageProps["entryDestination"]>,
+  base: TravelRequirement
+) {
+  const normalizedCity = destination.city.trim()
+  const normalizedProvince = destination.province.trim() || normalizedCity
+  const cityConfig = findProvinceByCity(normalizedCity)
+  return {
+    ...base,
+    province: normalizedProvince,
+    city: normalizedCity,
+    cityTagline:
+      destination.cityTagline ||
+      cityConfig?.tagline ||
+      base.cityTagline ||
+      `${normalizedCity}热门目的地`,
+  }
+}
+
+function withPlanDiagnostics(plan: TripPlan): TripPlan {
+  const validationResult = validatePlan(plan, plan.requirement)
+  const qualityScore = calculatePlanQualityScore(plan, validationResult, plan.requirement)
+  const withMeta = {
+    ...plan,
+    validationResult,
+    qualityScore,
+  }
+  return {
+    ...withMeta,
+    shareSummary: buildPlanShareSummary(withMeta),
+  }
+}
+
+function computePlanTotals(days: ItineraryDay[]) {
+  const totalDistanceMeters = days.reduce((sum, day) => sum + day.totalDistanceMeters, 0)
+  const totalTravelSeconds = days.reduce((sum, day) => sum + day.totalTravelSeconds, 0)
+  const totalPlayMinutes = days.reduce((sum, day) => sum + day.totalPlayMinutes, 0)
+  const totalEstimatedCost = days.reduce((sum, day) => sum + day.totalEstimatedCost, 0)
+  return {
+    totalDistanceMeters,
+    totalTravelSeconds,
+    totalPlayMinutes,
+    totalEstimatedCost,
+  }
+}
+
+function uniqueAttractionSpots(spots: Spot[]) {
+  return uniqueSpots(spots.filter((spot) => spot.type === "attraction"))
+}
+
+export function AIPlannnerPage({
+  onNavigate,
+  entryDestination,
+}: AIPlannnerPageProps) {
+  const { selectedSpots, savePlan, currentPlan, setCurrentPlan } = useTravel()
+  const didHydrateRef = useRef(false)
+  const latestEntryTokenRef = useRef<number | null>(null)
+  const manualSearchInputRef = useRef<HTMLInputElement | null>(null)
+
+  const [currentStep, setCurrentStep] = useState(1)
+  const [maxReachableStep, setMaxReachableStep] = useState(1)
+  const [citySearch, setCitySearch] = useState("")
+  const [manualSearch, setManualSearch] = useState("")
+  const [tripName, setTripName] = useState("")
+  const [departure, setDeparture] = useState("")
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const [manualEndDate, setManualEndDate] = useState(false)
+  const [requirement, setRequirement] = useState<TravelRequirement>(() => {
+    const base = initialRequirementFromSpots(selectedSpots)
+    if (!entryDestination) return base
+    return buildRequirementFromEntryDestination(entryDestination, base)
+  })
+  const [selectedPois, setSelectedPois] = useState<Spot[]>([])
+  const [manualSelectionCompleted, setManualSelectionCompleted] = useState(false)
+  const [skipManualSelection, setSkipManualSelection] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [buildError, setBuildError] = useState("")
+  const [generatedPlan, setGeneratedPlan] = useState<TripPlan | null>(null)
+  const [generationNotices, setGenerationNotices] = useState<string[]>([])
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [shareSheetOpen, setShareSheetOpen] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState("")
+  const [replaceSpotSheetOpen, setReplaceSpotSheetOpen] = useState(false)
+  const [replaceFoodSheetOpen, setReplaceFoodSheetOpen] = useState(false)
+  const [replaceHotelSheetOpen, setReplaceHotelSheetOpen] = useState(false)
+  const [activeEditSpotId, setActiveEditSpotId] = useState<string | null>(null)
+  const [activeMealType, setActiveMealType] = useState<"lunch" | "dinner">("lunch")
+  const [feedbackSentiment, setFeedbackSentiment] = useState<PlanFeedbackSentiment>("neutral")
+  const [feedbackTags, setFeedbackTags] = useState<PlanFeedbackTag[]>([])
+  const [feedbackComment, setFeedbackComment] = useState("")
+  const [feedbackDay, setFeedbackDay] = useState<number | null>(null)
+  const [isOptimizing, setIsOptimizing] = useState(false)
   const [showSaveSuccess, setShowSaveSuccess] = useState(false)
+  const [importNotice, setImportNotice] = useState("")
+  const [activeResultDayIndex, setActiveResultDayIndex] = useState(0)
+  const [activeMapSpotId, setActiveMapSpotId] = useState<string | null>(null)
+  const [activeMapLegId, setActiveMapLegId] = useState<string | null>(null)
+  const [activeRouteMode, setActiveRouteMode] =
+    useState<RouteTransportMode>("driving")
+  const [mapRouteLegOverrides, setMapRouteLegOverrides] = useState<
+    Record<number, ItineraryDay["routeLegs"]>
+  >({})
+  const [pendingCity, setPendingCity] = useState<{
+    province: string
+    city: string
+    cityTagline?: string
+    mismatched: Spot[]
+  } | null>(null)
 
-  const selectedDay = generatedPlan?.days?.[selectedDayIndex] ?? null
+  const closeActiveField = useCallback(() => {
+    if (typeof document === "undefined") return
+    const active = document.activeElement
+    if (active instanceof HTMLElement) active.blur()
+  }, [])
 
   useEffect(() => {
-    setMapMode(settings.transportMode)
-    setMapSummary(createInitialMapSummary(settings.transportMode))
-  }, [settings.transportMode])
+    if (didHydrateRef.current) return
+    didHydrateRef.current = true
+    if (selectedSpots.length > 0) {
+      setSelectedPois(uniqueSpots(selectedSpots))
+      setManualSelectionCompleted(true)
+      const majorityCity = inferMajorityCity(selectedSpots)
+      const suggestText = majorityCity
+        ? `，检测到你已选内容主要在“${majorityCity}”`
+        : ""
+      setImportNotice(`已从行程页自动导入 ${selectedSpots.length} 个已选地点${suggestText}`)
+    }
+  }, [selectedSpots])
 
   useEffect(() => {
-    if (!generatedPlan?.days?.length) {
-      setSelectedDayIndex(0)
+    if (!entryDestination) return
+    if (latestEntryTokenRef.current === entryDestination.token) return
+    latestEntryTokenRef.current = entryDestination.token
+    setRequirement((prev) => buildRequirementFromEntryDestination(entryDestination, prev))
+    setCurrentStep(1)
+    setMaxReachableStep((prev) => Math.max(prev, 1))
+    setImportNotice(
+      `已从${
+        entryDestination.source === "home-city" ? "首页推荐城市" : "外部入口"
+      }带入目的地：${entryDestination.city}`
+    )
+  }, [entryDestination])
+
+  useEffect(() => {
+    if (!currentPlan) return
+    const hydrated = withPlanDiagnostics(currentPlan)
+    setGeneratedPlan(hydrated)
+    setGenerationNotices(hydrated.generationNotices || [])
+    setTripName(hydrated.name || "")
+    setDeparture(hydrated.departure === "未设置" ? "" : hydrated.departure || "")
+    setStartDate(hydrated.startDate || "")
+    setEndDate(hydrated.endDate || "")
+    if (hydrated.requirement) {
+      setRequirement(hydrated.requirement)
+    }
+    setCurrentStep(5)
+    setMaxReachableStep((prev) => Math.max(prev, 5))
+    setIsEditMode(hydrated.planMode === "user_edited" || hydrated.feedbackRecords?.length ? true : false)
+    setActiveResultDayIndex(0)
+    setActiveMapSpotId(null)
+    setActiveMapLegId(null)
+    setMapRouteLegOverrides({})
+  }, [currentPlan])
+
+  useEffect(() => {
+    if (!manualEndDate) {
+      setEndDate(addDays(startDate, requirement.days))
+    }
+  }, [manualEndDate, requirement.days, startDate])
+
+  useEffect(() => {
+    closeActiveField()
+  }, [closeActiveField, currentStep])
+
+  useEffect(() => {
+    if (!requirement.city || selectedPois.length === 0) return
+    const conflict = detectCityConflict(selectedPois, requirement.city, requirement.province)
+    if (conflict.mismatched.length > 0) {
+      setImportNotice(
+        `当前目的地为“${requirement.city}”，已选清单中有 ${conflict.mismatched.length} 个异地地点待处理`
+      )
+    }
+  }, [requirement.city, requirement.province, selectedPois])
+
+  const dateError = useMemo(
+    () => validateDates(startDate, endDate),
+    [startDate, endDate]
+  )
+
+  const citySpots = useMemo(
+    () =>
+      sampleSpots.filter((spot) =>
+        isSpotInDestination(spot, {
+          city: requirement.city,
+          province: requirement.province,
+        })
+      ),
+    [requirement.city, requirement.province]
+  )
+
+  const allSelectableSpots = useMemo(
+    () =>
+      uniqueSpots(
+        [...selectedSpots, ...citySpots].filter((spot) =>
+          isSpotInDestination(spot, {
+            city: requirement.city,
+            province: requirement.province,
+          })
+        )
+      ),
+    [citySpots, requirement.city, requirement.province, selectedSpots]
+  )
+
+  const recommendationBase = useMemo(
+    () => getRecommendedPoisByRequirement(requirement, requirement.city, allSelectableSpots, 12),
+    [allSelectableSpots, requirement]
+  )
+
+  const recommendedBundles = useMemo(
+    () => getRecommendedBundles(requirement, requirement.city, allSelectableSpots),
+    [allSelectableSpots, requirement]
+  )
+
+  const manualSearchResult = useMemo(() => {
+    const keyword = manualSearch.trim().toLowerCase()
+    if (!keyword) return allSelectableSpots.slice(0, 8)
+    return allSelectableSpots.filter((spot) =>
+      `${spot.name}${spot.address}${spot.tags.join("")}`
+        .toLowerCase()
+        .includes(keyword)
+    )
+  }, [allSelectableSpots, manualSearch])
+
+  const selectedPoiIdSet = useMemo(
+    () => new Set(selectedPois.map((item) => item.id)),
+    [selectedPois]
+  )
+
+  const canGoNext = useMemo(() => {
+    if (currentStep === 1) return Boolean(requirement.province && requirement.city)
+    if (currentStep === 2) return requirement.interests.length > 0
+    if (currentStep === 4) return !isGenerating && !dateError
+    return true
+  }, [
+    currentStep,
+    dateError,
+    isGenerating,
+    requirement.interests.length,
+    requirement.province,
+    requirement.city,
+  ])
+
+  const stepThreeStatusText =
+    selectedPois.length > 0
+      ? `你已手动添加 ${selectedPois.length} 项，生成时会优先保留`
+      : "当前未手动添加内容，下一步将按城市、预算与偏好自动推荐"
+
+  const resultDays = generatedPlan?.days || []
+  const activeResultDay =
+    resultDays[activeResultDayIndex] || resultDays[0] || null
+
+  const editableAttractionPool = useMemo(() => {
+    const planSpots = generatedPlan?.spots || []
+    const daySpots = resultDays.flatMap((day) => day.spots)
+    return uniqueAttractionSpots([...allSelectableSpots, ...planSpots, ...daySpots])
+  }, [allSelectableSpots, generatedPlan?.spots, resultDays])
+
+  const editableRestaurantPool = useMemo(() => {
+    const planSpots = generatedPlan?.spots || []
+    const daySpots = resultDays.flatMap((day) => day.spots)
+    return uniqueSpots([...allSelectableSpots, ...planSpots, ...daySpots]).filter(
+      (spot) => spot.type === "restaurant"
+    )
+  }, [allSelectableSpots, generatedPlan?.spots, resultDays])
+
+  const editableHotelPool = useMemo(() => {
+    const planSpots = generatedPlan?.spots || []
+    const daySpots = resultDays.flatMap((day) => day.spots)
+    return uniqueSpots([...allSelectableSpots, ...planSpots, ...daySpots]).filter(
+      (spot) => spot.type === "hotel"
+    )
+  }, [allSelectableSpots, generatedPlan?.spots, resultDays])
+
+  const replaceSpotCandidates = useMemo(() => {
+    if (!activeResultDay || !activeEditSpotId) return []
+    return getSpotReplacementCandidates({
+      day: activeResultDay,
+      spotId: activeEditSpotId,
+      pool: editableAttractionPool,
+      lockedSpotIds: generatedPlan?.lockedSpotIds || [],
+      max: 10,
+    })
+  }, [activeResultDay, activeEditSpotId, editableAttractionPool, generatedPlan?.lockedSpotIds])
+
+  const replaceFoodCandidates = useMemo(() => {
+    if (!activeResultDay) return []
+    return getMealReplacementCandidates({
+      day: activeResultDay,
+      mealType: activeMealType,
+      pool: editableRestaurantPool,
+      max: 12,
+    })
+  }, [activeMealType, activeResultDay, editableRestaurantPool])
+
+  const replaceHotelCandidates = useMemo(() => {
+    if (!activeResultDay) return []
+    const nextDay = resultDays[activeResultDayIndex + 1] || null
+    return getHotelReplacementCandidates({
+      day: activeResultDay,
+      nextDay,
+      pool: editableHotelPool,
+      max: 12,
+    })
+  }, [activeResultDay, activeResultDayIndex, editableHotelPool, resultDays])
+
+  const handleResultDayChange = useCallback((index: number) => {
+    setActiveResultDayIndex(index)
+    setActiveMapSpotId(null)
+    setActiveMapLegId(null)
+  }, [])
+
+  const focusSpotCard = useCallback((spotId: string) => {
+    if (typeof document === "undefined") return
+    const target = document.getElementById(`result-day-${activeResultDay?.day ?? 1}-spot-${spotId}`)
+    target?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [activeResultDay?.day])
+
+  const handleMapSpotSelect = useCallback((spotId: string) => {
+    setActiveMapSpotId(spotId)
+    setActiveMapLegId(null)
+    focusSpotCard(spotId)
+  }, [focusSpotCard])
+
+  const handleMapLegSelect = useCallback((legId: string) => {
+    setActiveMapLegId(legId)
+  }, [])
+
+  const applyGeneratedPlan = useCallback(
+    (nextPlan: TripPlan) => {
+      const enriched = withPlanDiagnostics(nextPlan)
+      setGeneratedPlan(enriched)
+      setGenerationNotices(Array.from(new Set(enriched.generationNotices || [])))
+      setMapRouteLegOverrides({})
+      setActiveMapSpotId(null)
+      setActiveMapLegId(null)
+      setCurrentPlan(enriched)
+    },
+    [setCurrentPlan]
+  )
+
+  const rebuildFromDaySpotMatrix = useCallback(
+    async (
+      matrix: string[][],
+      reason: string,
+      basePlan?: TripPlan
+    ) => {
+      const seedPlan = basePlan || generatedPlan
+      if (!seedPlan) return
+      const sourceDays = seedPlan.days || []
+      const dayMetas = sourceDays.map((day) => ({
+        theme: day.theme,
+        districtSummary: day.districtSummary,
+        warnings: day.warnings,
+      }))
+      const availableSpotMap = new Map(
+        uniqueAttractionSpots([
+          ...editableAttractionPool,
+          ...(seedPlan.spots || []),
+          ...sourceDays.flatMap((day) => day.spots),
+        ]).map((spot) => [spot.id, spot] as const)
+      )
+
+      const routeSpots = uniqueAttractionSpots(
+        matrix
+          .flatMap((ids) => ids)
+          .map((id) => availableSpotMap.get(id))
+          .filter((item): item is Spot => Boolean(item))
+      )
+
+      if (routeSpots.length === 0) {
+        setBuildError("当前编辑结果缺少可用景点，无法重算路线。")
+        return
+      }
+
+      setIsOptimizing(true)
+      try {
+        const itineraryResult = await buildAiItinerary({
+          spots: routeSpots,
+          startDate: seedPlan.startDate,
+          endDate: seedPlan.endDate,
+          pace: toEnginePace(seedPlan.requirement?.pace || requirement.pace),
+          departure: seedPlan.departure === "未设置" ? "" : seedPlan.departure,
+          transportMode: activeRouteMode,
+          requirement: seedPlan.requirement || requirement,
+          forcedDaySpotIds: matrix,
+          forcedDayMetas: dayMetas,
+        })
+
+        const totals = computePlanTotals(itineraryResult.days)
+        const nextPlan: TripPlan = {
+          ...seedPlan,
+          spots: routeSpots,
+          days: itineraryResult.days,
+          totalDays: itineraryResult.days.length,
+          totalSpots: routeSpots.length,
+          ...totals,
+          generationStatus: itineraryResult.status,
+          generationNotices: Array.from(
+            new Set([...(seedPlan.generationNotices || []), ...itineraryResult.notices, reason])
+          ),
+          plannerWarnings: Array.from(
+            new Set([...(seedPlan.generationNotices || []), ...itineraryResult.notices, reason])
+          ).map((message) => ({ level: "info", message })),
+          planMode: "user_edited",
+          lastEditedAt: new Date().toISOString(),
+        }
+
+        applyGeneratedPlan(nextPlan)
+      } catch (error) {
+        setBuildError(error instanceof Error ? error.message : "重算失败，请稍后重试")
+      } finally {
+        setIsOptimizing(false)
+      }
+    },
+    [
+      activeRouteMode,
+      applyGeneratedPlan,
+      editableAttractionPool,
+      generatedPlan,
+      requirement,
+    ]
+  )
+
+  const applyDayEdit = useCallback(
+    (dayNumber: number, patcher: (day: ItineraryDay) => ItineraryDay, reason: string) => {
+      if (!generatedPlan) return
+      const patched = applyDayPatch(generatedPlan, dayNumber, patcher)
+      applyGeneratedPlan({
+        ...patched,
+        generationNotices: Array.from(new Set([...(patched.generationNotices || []), reason])),
+      })
+    },
+    [applyGeneratedPlan, generatedPlan]
+  )
+
+  const handleMoveSpot = useCallback(
+    async (spotId: string, direction: "up" | "down") => {
+      if (!activeResultDay) return
+      const lockedSet = new Set(generatedPlan?.lockedSpotIds || [])
+      if (lockedSet.has(spotId)) return
+      const matrix = toDaySpotIdMatrix(resultDays)
+      const updatedMatrix = moveSpotIdInMatrix(matrix, activeResultDayIndex, spotId, direction)
+      await rebuildFromDaySpotMatrix(updatedMatrix, "已按你的操作重新调整顺序。")
+    },
+    [activeResultDay, activeResultDayIndex, generatedPlan?.lockedSpotIds, rebuildFromDaySpotMatrix, resultDays]
+  )
+
+  const handleReplaceSpotCandidate = useCallback(
+    async (candidate: PlanReplaceCandidate) => {
+      if (!activeEditSpotId) return
+      const lockedSet = new Set(generatedPlan?.lockedSpotIds || [])
+      if (lockedSet.has(activeEditSpotId)) return
+      const matrix = toDaySpotIdMatrix(resultDays)
+      const updatedMatrix = replaceSpotIdInMatrix(
+        matrix,
+        activeResultDayIndex,
+        activeEditSpotId,
+        candidate.spot.id
+      )
+      setReplaceSpotSheetOpen(false)
+      await rebuildFromDaySpotMatrix(updatedMatrix, `已替换景点为：${candidate.spot.name}`)
+    },
+    [
+      activeEditSpotId,
+      activeResultDayIndex,
+      generatedPlan?.lockedSpotIds,
+      rebuildFromDaySpotMatrix,
+      resultDays,
+    ]
+  )
+
+  const handleReplaceMealCandidate = useCallback(
+    (candidate: PlanReplaceCandidate) => {
+      if (!activeResultDay) return
+      const suggestion = toSuggestionFromSpot(candidate.spot, "food", candidate.reason)
+      applyDayEdit(
+        activeResultDay.day,
+        (day) => updateDayMeal(day, activeMealType, suggestion),
+        `已替换${activeMealType === "lunch" ? "午餐" : "晚餐"}：${candidate.spot.name}`
+      )
+      setReplaceFoodSheetOpen(false)
+    },
+    [activeMealType, activeResultDay, applyDayEdit]
+  )
+
+  const handleReplaceHotelCandidate = useCallback(
+    (candidate: PlanReplaceCandidate) => {
+      if (!activeResultDay) return
+      const suggestion = toSuggestionFromSpot(
+        candidate.spot,
+        "hotel",
+        "靠近当日终点/次日起点的替换候选"
+      )
+      applyDayEdit(
+        activeResultDay.day,
+        (day) => updateDayHotel(day, suggestion),
+        `已替换酒店：${candidate.spot.name}`
+      )
+      setReplaceHotelSheetOpen(false)
+    },
+    [activeResultDay, applyDayEdit]
+  )
+
+  const handleToggleSpotLock = useCallback(
+    (spotId: string) => {
+      if (!generatedPlan) return
+      const lockedSpotIds = toggleLockedSpot(generatedPlan.lockedSpotIds || [], spotId)
+      applyGeneratedPlan({
+        ...generatedPlan,
+        lockedSpotIds,
+        planMode: "user_edited",
+        lastEditedAt: new Date().toISOString(),
+      })
+    },
+    [applyGeneratedPlan, generatedPlan]
+  )
+
+  const handleOptimizeCurrentDay = useCallback(async () => {
+    const matrix = toDaySpotIdMatrix(resultDays)
+    await rebuildFromDaySpotMatrix(matrix, "已按当前偏好重新优化当天路线。")
+  }, [rebuildFromDaySpotMatrix, resultDays])
+
+  const toggleFeedbackTag = (tag: PlanFeedbackTag) => {
+    setFeedbackTags((prev) => {
+      if (prev.includes(tag)) return prev.filter((item) => item !== tag)
+      return [...prev, tag]
+    })
+  }
+
+  const handleSubmitFeedback = useCallback(async () => {
+    if (!generatedPlan) return
+    if (feedbackTags.length === 0) return
+
+    const feedback = createPlanFeedbackRecord({
+      sentiment: feedbackSentiment,
+      tags: feedbackTags,
+      comment: feedbackComment,
+      day: feedbackDay || activeResultDay?.day,
+    })
+    const actions = deriveFeedbackActions({
+      sentiment: feedbackSentiment,
+      tags: feedbackTags,
+      comment: feedbackComment,
+      day: feedbackDay || activeResultDay?.day,
+    })
+
+    let nextPlan: TripPlan = {
+      ...generatedPlan,
+      feedbackRecords: [...(generatedPlan.feedbackRecords || []), feedback],
+      planMode: "user_edited",
+      lastEditedAt: new Date().toISOString(),
+    }
+
+    let shouldRebuild = false
+    const matrix = toDaySpotIdMatrix(nextPlan.days || [])
+
+    for (const action of actions) {
+      const dayNumber = action.day || activeResultDay?.day || 1
+      const dayIndex = Math.max(0, (nextPlan.days || []).findIndex((item) => item.day === dayNumber))
+      const targetDay = nextPlan.days?.[dayIndex]
+      if (!targetDay) continue
+
+      if (action.action === "replace_restaurant") {
+        const candidate = getMealReplacementCandidates({
+          day: targetDay,
+          mealType: "dinner",
+          pool: editableRestaurantPool,
+          max: 1,
+        })[0]
+        if (candidate) {
+          nextPlan = applyDayPatch(nextPlan, dayNumber, (day) =>
+            updateDayMeal(day, "dinner", toSuggestionFromSpot(candidate.spot, "food", candidate.reason))
+          )
+        }
+      }
+
+      if (action.action === "replace_hotel") {
+        const candidate = getHotelReplacementCandidates({
+          day: targetDay,
+          nextDay: nextPlan.days?.[dayIndex + 1] || null,
+          pool: editableHotelPool,
+          max: 1,
+        })[0]
+        if (candidate) {
+          nextPlan = applyDayPatch(nextPlan, dayNumber, (day) =>
+            updateDayHotel(day, toSuggestionFromSpot(candidate.spot, "hotel", candidate.reason))
+          )
+        }
+      }
+
+      if (action.action === "rebalance_budget") {
+        const lowFood = editableRestaurantPool
+          .filter((spot) => spot.ticketPrice > 0)
+          .sort((a, b) => a.ticketPrice - b.ticketPrice)[0]
+        const lowHotel = editableHotelPool
+          .filter((spot) => spot.ticketPrice > 0)
+          .sort((a, b) => a.ticketPrice - b.ticketPrice)[0]
+        if (lowFood) {
+          nextPlan = applyDayPatch(nextPlan, dayNumber, (day) =>
+            updateDayMeal(day, "dinner", toSuggestionFromSpot(lowFood, "food", "已按反馈替换为更省钱餐饮"))
+          )
+        }
+        if (lowHotel) {
+          nextPlan = applyDayPatch(nextPlan, dayNumber, (day) =>
+            updateDayHotel(day, toSuggestionFromSpot(lowHotel, "hotel", "已按反馈替换为更省钱酒店"))
+          )
+        }
+      }
+
+      if (action.action === "rebalance_pace") {
+        const dayIds = [...(matrix[dayIndex] || [])]
+        if (dayIds.length > 2) {
+          dayIds.pop()
+          matrix[dayIndex] = dayIds
+          shouldRebuild = true
+        }
+      }
+
+      if (action.action === "optimize_day") {
+        shouldRebuild = true
+      }
+    }
+
+    nextPlan = {
+      ...nextPlan,
+      generationNotices: Array.from(new Set([...(nextPlan.generationNotices || []), "已根据反馈执行局部优化。"])),
+    }
+
+    if (shouldRebuild) {
+      await rebuildFromDaySpotMatrix(matrix, "已根据你的反馈局部重算。", nextPlan)
+    } else {
+      applyGeneratedPlan(nextPlan)
+    }
+
+    setFeedbackComment("")
+    setFeedbackTags([])
+  }, [
+    activeResultDay?.day,
+    applyGeneratedPlan,
+    editableHotelPool,
+    editableRestaurantPool,
+    feedbackComment,
+    feedbackDay,
+    feedbackSentiment,
+    feedbackTags,
+    generatedPlan,
+    rebuildFromDaySpotMatrix,
+  ])
+
+  const handleShareSummary = useCallback(async () => {
+    if (!generatedPlan) return
+    const summaryText = toShareSummaryText(
+      generatedPlan.shareSummary || buildPlanShareSummary(generatedPlan)
+    )
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(summaryText)
+        setShareFeedback("分享摘要已复制到剪贴板")
+      } catch {
+        setShareFeedback("复制失败，请稍后重试")
+      }
+    } else {
+      setShareFeedback("当前环境不支持剪贴板复制")
+    }
+    window.setTimeout(() => setShareFeedback(""), 1800)
+  }, [generatedPlan])
+
+  const applyCitySelection = (province: string, city: string, cityTagline?: string) => {
+    closeActiveField()
+    const conflict = detectCityConflict(selectedPois, city, province)
+    if (conflict.mismatched.length > 0) {
+      setPendingCity({ province, city, cityTagline, mismatched: conflict.mismatched })
       return
     }
-    if (selectedDayIndex > generatedPlan.days.length - 1) {
-      setSelectedDayIndex(0)
-    }
-  }, [generatedPlan?.days, selectedDayIndex])
-
-  const hasSpots = selectedSpots.length > 0
-  const totalTicketPrice = useMemo(
-    () => selectedSpots.reduce((sum, spot) => sum + spot.ticketPrice, 0),
-    [selectedSpots]
-  )
-
-  const statusToneClass = useMemo(() => {
-    if (!generatedPlan?.generationStatus) return "bg-secondary/40 text-muted-foreground"
-    if (generatedPlan.generationStatus === "success")
-      return "bg-emerald-50 text-emerald-700"
-    if (generatedPlan.generationStatus === "partial")
-      return "bg-amber-50 text-amber-700"
-    return "bg-red-50 text-red-600"
-  }, [generatedPlan?.generationStatus])
-
-  const handleGenerate = async () => {
-    if (!hasSpots) return
-    setShowSaveSuccess(false)
-    setStep("generating")
-
-    const routeResult = await buildAiItinerary({
-      spots: selectedSpots,
-      startDate: settings.startDate,
-      endDate: settings.endDate,
-      pace: settings.pace,
-      departure: settings.departure,
-      transportMode: settings.transportMode,
-    })
-
-    const paceLabel =
-      paceOptions.find((option) => option.id === settings.pace)?.label || "适中"
-    const plan: TripPlan = {
-      id: `draft-${Date.now()}`,
-      name: settings.tripName || "AI 行程规划",
-      startDate: settings.startDate || new Date().toISOString().slice(0, 10),
-      endDate: settings.endDate || new Date().toISOString().slice(0, 10),
-      pace: paceLabel,
-      departure: settings.departure || "酒店/出发地",
-      spots: selectedSpots,
-      createdAt: new Date().toISOString(),
-      days: routeResult.days,
-      totalDays: routeResult.totalDays,
-      totalSpots: routeResult.totalSpots,
-      totalDistanceMeters: routeResult.totalDistanceMeters,
-      totalTravelSeconds: routeResult.totalTravelSeconds,
-      totalPlayMinutes: routeResult.totalPlayMinutes,
-      totalEstimatedCost: routeResult.totalEstimatedCost,
-      generationStatus: routeResult.status,
-      generationNotices: routeResult.notices,
-    }
-
-    setGeneratedPlan(plan)
-    setSelectedDayIndex(0)
-    setMapMode(settings.transportMode)
-    setMapSummary(createInitialMapSummary(settings.transportMode))
-    setStep("result")
+    setRequirement((prev) => ({ ...prev, province, city, cityTagline }))
   }
 
-  const handleSave = () => {
+  const handleAddSpot = (spotId: string) => {
+    const found = allSelectableSpots.find((spot) => spot.id === spotId)
+    if (!found) return
+    if (
+      !isSpotInDestination(found, {
+        city: requirement.city,
+        province: requirement.province,
+      })
+    ) {
+      setImportNotice(`“${found.name}”与当前目的地不一致，已阻止加入`)
+      return
+    }
+    setSelectedPois((prev) => uniqueSpots([...prev, found]))
+    setManualSelectionCompleted(true)
+    setSkipManualSelection(false)
+  }
+
+  const handleAddBundle = (bundle: { poiIds: string[] }) => {
+    const byId = new Map(allSelectableSpots.map((spot) => [spot.id, spot]))
+    const spots = bundle.poiIds
+      .map((id) => byId.get(id))
+      .filter((item): item is Spot => Boolean(item))
+    if (spots.length === 0) return
+    const matched = spots.filter((spot) =>
+      isSpotInDestination(spot, {
+        city: requirement.city,
+        province: requirement.province,
+      })
+    )
+    const removedCount = spots.length - matched.length
+    if (removedCount > 0) {
+      setImportNotice(`组合中有 ${removedCount} 个异地地点已自动过滤`)
+    }
+    if (matched.length === 0) return
+    setSelectedPois((prev) => uniqueSpots([...prev, ...matched]))
+    setManualSelectionCompleted(true)
+    setSkipManualSelection(false)
+  }
+
+  const handleSkipStepThree = () => {
+    setSkipManualSelection(true)
+    setManualSelectionCompleted(false)
+    setMaxReachableStep((prev) => Math.max(prev, 4))
+    setCurrentStep(4)
+  }
+
+  const handleGeneratePlan = async () => {
+    if (dateError) {
+      setBuildError(dateError)
+      return
+    }
+
+    setBuildError("")
+    setIsGenerating(true)
+    try {
+      closeActiveField()
+      const filteredManual = filterSpotsByCity(
+        selectedPois,
+        requirement.city,
+        requirement.province
+      )
+      const removedForCity = selectedPois.length - filteredManual.length
+
+      const autoRecommend = getRecommendedPoisByRequirement(
+        requirement,
+        requirement.city,
+        allSelectableSpots,
+        Math.max(requirement.days * 4, 6)
+      ).map((item) => item.spot)
+
+      let finalSpots: Spot[] = []
+      let generationSource: TripPlan["generationSource"] = "auto"
+
+      if (filteredManual.length === 0) {
+        finalSpots = uniqueSpots(autoRecommend)
+      } else {
+        const supplements = autoRecommend.filter(
+          (spot) => !filteredManual.some((item) => item.id === spot.id)
+        )
+        finalSpots = uniqueSpots([...filteredManual, ...supplements.slice(0, requirement.days * 2)])
+        generationSource = supplements.length > 0 ? "mixed" : "manual"
+      }
+
+      if (finalSpots.length === 0) {
+        finalSpots = citySpots.slice(0, 8)
+      }
+      if (finalSpots.length === 0) {
+        throw new Error("当前目的地下暂无可规划地点，请先切换城市或补充内容。")
+      }
+
+      const attractionCandidates = uniqueSpots(
+        finalSpots.filter((spot) => spot.type === "attraction")
+      )
+      const restaurantCandidateSpots = uniqueSpots(
+        [...allSelectableSpots, ...citySpots, ...autoRecommend, ...filteredManual].filter(
+          (spot) => spot.type === "restaurant"
+        )
+      ).slice(0, 80)
+      const hotelPreferenceBoostIds = new Set(
+        getHotelRecommendations({
+          city: requirement.city,
+          budgetRange: requirement.budgetRange,
+          companions: requirement.companions,
+          interests: requirement.interests,
+          limit: 30,
+        }).map((hotel) => hotel.id)
+      )
+      const hotelCandidateSpots = uniqueSpots(
+        [...allSelectableSpots, ...citySpots, ...filteredManual, ...finalSpots].filter(
+          (spot) => spot.type === "hotel"
+        )
+      )
+        .map((spot) =>
+          hotelPreferenceBoostIds.has(spot.id)
+            ? {
+                ...spot,
+                tags: Array.from(new Set([...(spot.tags || []), "评论偏好匹配"])),
+              }
+            : spot
+        )
+        .slice(0, 60)
+      const plannerPayload: PlannerDecisionRequest = {
+        destination: `${requirement.city} ${requirement.days}日游`,
+        city: requirement.city,
+        province: requirement.province,
+        totalDays: requirement.days,
+        budgetRange: requirement.budgetRange,
+        companions: requirement.companions,
+        interests: requirement.interests,
+        pace: requirement.pace || "balanced",
+        specialNeeds: requirement.specialNeeds || [],
+        attractions: attractionCandidates.map((spot) => toPlannerCandidate(spot)),
+        restaurants: restaurantCandidateSpots.map((spot) => toPlannerCandidate(spot)),
+        hotels: hotelCandidateSpots.map((spot) => toPlannerCandidate(spot)),
+        routeHints: buildPlannerRouteHints(attractionCandidates),
+        manualPreferredPlaceIds: filteredManual.map((spot) => spot.id),
+      }
+
+      let plannerDecision: PlannerDecisionResult | null = null
+      let plannerRequestFailed = ""
+      try {
+        plannerDecision = await requestPlannerDecision(plannerPayload)
+      } catch (error) {
+        plannerRequestFailed = error instanceof Error ? error.message : "规划决策服务不可用"
+      }
+
+      const attractionMap = new Map(attractionCandidates.map((spot) => [spot.id, spot]))
+      const forcedDaySpotIds = plannerDecision?.plan.days.map((day) =>
+        day.spots.map((spot) => spot.placeId)
+      )
+      const forcedDayMetas = plannerDecision?.plan.days.map((day) => ({
+        theme: day.theme,
+        districtSummary: day.districtSummary,
+        warnings: day.warnings,
+      }))
+      const forcedSpotReasonMap: Record<string, string> = {}
+      if (plannerDecision) {
+        for (const day of plannerDecision.plan.days) {
+          for (const spot of day.spots) {
+            if (spot.reason) {
+              forcedSpotReasonMap[spot.placeId] = spot.reason
+            }
+          }
+        }
+      }
+
+      const plannedAttractions = plannerDecision
+        ? uniqueSpots(
+            plannerDecision.plan.days
+              .flatMap((day) => day.spots.map((spot) => attractionMap.get(spot.placeId)))
+              .filter((spot): spot is Spot => Boolean(spot))
+          )
+        : []
+      const fallbackAttractions = uniqueSpots(
+        citySpots.filter((spot) => spot.type === "attraction")
+      ).slice(0, Math.max(requirement.days * 4, 6))
+
+      const routeSpots =
+        plannedAttractions.length > 0
+          ? plannedAttractions
+          : attractionCandidates.length > 0
+          ? attractionCandidates
+          : fallbackAttractions.length > 0
+          ? fallbackAttractions
+          : finalSpots
+
+      const itineraryResult = await buildAiItinerary({
+        spots: routeSpots,
+        startDate,
+        endDate,
+        pace: toEnginePace(requirement.pace),
+        departure,
+        transportMode: "driving",
+        requirement,
+        forcedDaySpotIds,
+        forcedDayMetas,
+        forcedSpotReasonMap,
+      })
+
+      const restaurantMap = new Map(restaurantCandidateSpots.map((spot) => [spot.id, spot]))
+      const hotelMap = new Map(hotelCandidateSpots.map((spot) => [spot.id, spot]))
+      const resolvedDays = applyStructuredSuggestions(
+        itineraryResult.days,
+        plannerDecision?.plan.days,
+        restaurantMap,
+        hotelMap
+      )
+
+      const totals = computePlanTotals(resolvedDays)
+
+      const notices = [...itineraryResult.notices]
+      if (plannerRequestFailed) {
+        notices.unshift(`智能决策层不可用，已降级为基础规则方案：${plannerRequestFailed}`)
+      }
+      if (plannerDecision?.source === "fallback") {
+        notices.unshift("当前已使用基础规划方案（规则引擎），可配置Qwen后获得偏好增强决策。")
+      }
+      if (plannerDecision?.warnings?.length) {
+        notices.push(...plannerDecision.warnings)
+      }
+      if (selectedPois.length === 0) {
+        notices.unshift("你未手动添加内容，系统已按需求自动推荐并生成方案。")
+      }
+      if (removedForCity > 0) {
+        notices.unshift(`已移除 ${removedForCity} 个与“${requirement.city}”不一致的地点。`)
+      }
+
+      const plan: TripPlan = {
+        id: Date.now().toString(),
+        name: tripName.trim() || `${requirement.city || "目的地"}智能行程`,
+        startDate,
+        endDate,
+        pace: toPaceLabel(requirement.pace),
+        departure: departure.trim() || "未设置",
+        spots: routeSpots,
+        createdAt: new Date().toISOString(),
+        days: resolvedDays,
+        totalDays: resolvedDays.length || itineraryResult.totalDays,
+        totalSpots: routeSpots.length || itineraryResult.totalSpots,
+        totalDistanceMeters: totals.totalDistanceMeters,
+        totalTravelSeconds: totals.totalTravelSeconds,
+        totalPlayMinutes: totals.totalPlayMinutes,
+        totalEstimatedCost: totals.totalEstimatedCost,
+        generationStatus: itineraryResult.status,
+        generationNotices: notices,
+        requirement,
+        selectedPoisSnapshot: filteredManual.map((spot) => toSelectedPoiSnapshot(spot)),
+        manualSelectionCompleted: filteredManual.length > 0 || manualSelectionCompleted,
+        skipManualSelection: filteredManual.length === 0 || skipManualSelection,
+        generationSource,
+        plannerWarnings: notices.map((message) => ({ level: "info", message })),
+        plannerEngineMode: plannerDecision?.source || "fallback",
+        generatedPlan: plannerDecision?.plan,
+        planExplanations: plannerDecision?.plan.explanations || [],
+        planMode: "ai_original",
+        lockedSpotIds: [],
+        feedbackRecords: [],
+        lastEditedAt: new Date().toISOString(),
+      }
+
+      applyGeneratedPlan(plan)
+      setActiveResultDayIndex(0)
+      setActiveMapSpotId(null)
+      setActiveMapLegId(null)
+      setActiveRouteMode("driving")
+      setMapRouteLegOverrides({})
+      setIsEditMode(false)
+      setMaxReachableStep((prev) => Math.max(prev, 5))
+      setCurrentStep(5)
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : "生成失败，请稍后重试")
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handleNext = () => {
+    if (!canGoNext) return
+    closeActiveField()
+    if (currentStep === 3) {
+      setSkipManualSelection(selectedPois.length === 0)
+      setManualSelectionCompleted(selectedPois.length > 0)
+    }
+    if (currentStep === 4) {
+      void handleGeneratePlan()
+      return
+    }
+    setCurrentStep((prev) => prev + 1)
+    setMaxReachableStep((prev) => Math.max(prev, currentStep + 1))
+  }
+
+  const handleSavePlan = () => {
     if (!generatedPlan) return
-    savePlan({
-      ...generatedPlan,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    })
+    const toSave = {
+      ...withPlanDiagnostics(generatedPlan),
+      lastEditedAt: new Date().toISOString(),
+    }
+    savePlan(toSave)
+    setCurrentPlan(toSave)
     setShowSaveSuccess(true)
     setTimeout(() => setShowSaveSuccess(false), 1800)
   }
 
-  const handleReset = () => {
-    setGeneratedPlan(null)
-    setSelectedDayIndex(0)
-    setStep("config")
-  }
+  const activeRouteLegsOverride = activeResultDay
+    ? mapRouteLegOverrides[activeResultDay.day]
+    : undefined
+  const shareSummary =
+    generatedPlan ? generatedPlan.shareSummary || buildPlanShareSummary(generatedPlan) : null
 
-  if (!hasSpots) {
-    return (
-      <div className="min-h-screen pb-24 animate-fade-in">
-        <header className="px-6 pt-12 pb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+  return (
+    <div className="app-page animate-fade-in space-y-4 pb-28">
+      <AppCard tone="elevated" padding="md" className="soft-gradient relative overflow-hidden">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[color:rgba(93,111,47,0.14)] blur-2xl" />
+        <div className="relative space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[var(--app-radius-sm)] bg-[var(--app-brand)] text-white">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-[1.2rem] font-semibold tracking-[0.01em] text-[var(--app-text-strong)]">AI 规划你的行程</h1>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--app-text-secondary)]">
+                  按步骤完成目的地、偏好、预算设置，生成可直接执行的旅行路线。
+                </p>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-foreground">AI智能规划</h1>
+            <AppTag tone="brand" className="numeric">
+              Step {currentStep}/{STEP_TITLES.length}
+            </AppTag>
           </div>
-          <p className="text-muted-foreground">让 AI 为您生成详细行程路线</p>
-        </header>
-
-        <div className="px-6 py-12 text-center">
-          <div className="w-28 h-28 mx-auto mb-6 rounded-full bg-secondary flex items-center justify-center">
-            <MapPin className="w-12 h-12 text-primary" />
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-[0.7rem] bg-[var(--app-surface-elevated)] px-2 py-2">
+              <p className="text-[10px] text-[var(--app-text-muted)]">目的地</p>
+              <p className="truncate text-xs font-semibold text-[var(--app-text-primary)]">{requirement.city || "未选择"}</p>
+            </div>
+            <div className="rounded-[0.7rem] bg-[var(--app-surface-elevated)] px-2 py-2">
+              <p className="text-[10px] text-[var(--app-text-muted)]">天数</p>
+              <p className="numeric text-xs font-semibold text-[var(--app-text-primary)]">{requirement.days} 天</p>
+            </div>
+            <div className="rounded-[0.7rem] bg-[var(--app-surface-elevated)] px-2 py-2">
+              <p className="text-[10px] text-[var(--app-text-muted)]">偏好标签</p>
+              <p className="numeric text-xs font-semibold text-[var(--app-text-primary)]">{requirement.interests.length}</p>
+            </div>
           </div>
-          <h3 className="text-xl font-bold text-foreground mb-2">请先添加行程点</h3>
-          <p className="text-muted-foreground mb-6">
-            去探索页面选择景点后，AI 才能生成详细时间线与导航路程
-          </p>
-          <button
-            onClick={() => onNavigate("explore")}
-            className="px-8 py-4 bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-opacity btn-press"
-          >
-            去探索添加景点
-          </button>
         </div>
-      </div>
-    )
-  }
+      </AppCard>
 
-  if (step === "generating") {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6 animate-fade-in">
-        <div className="text-center">
-          <div className="w-20 h-20 mx-auto rounded-full bg-primary/10 flex items-center justify-center mb-6">
-            <Loader2 className="w-10 h-10 text-primary animate-spin" />
+      <div className="space-y-4">
+        <PlannerStepper
+          steps={STEP_TITLES}
+          currentStep={currentStep}
+          maxReachableStep={maxReachableStep}
+          onStepChange={(target) => {
+            closeActiveField()
+            if (target <= maxReachableStep) setCurrentStep(target)
+          }}
+        />
+
+        {importNotice && currentStep <= 3 && (
+          <div className="rounded-[var(--app-radius-sm)] border border-[color:rgba(93,111,47,0.24)] bg-[var(--app-brand-soft)] px-3 py-2 text-[11px] text-[var(--app-brand)]">
+            {importNotice}
           </div>
-          <h2 className="text-2xl font-bold text-foreground mb-2">正在生成详细行程</h2>
-          <p className="text-muted-foreground">
-            正在计算每日路线段、时间线和汇总信息，请稍候...
-          </p>
-        </div>
-      </div>
-    )
-  }
+        )}
 
-  if (step === "result" && generatedPlan) {
-    return (
-      <div className="min-h-screen pb-28 animate-fade-in">
-        <header className="sticky top-0 z-30 px-6 pt-12 pb-5 bg-gradient-to-r from-primary to-accent shadow-sm">
-          <div className="flex items-center gap-2 text-primary-foreground/90 text-sm mb-2">
-            {generatedPlan.generationStatus === "error" ? (
-              <TriangleAlert className="w-4 h-4" />
-            ) : (
-              <CheckCircle className="w-4 h-4" />
+        {currentStep === 1 && (
+          <AppCard tone="elevated" padding="md">
+            <CityPicker
+              province={requirement.province}
+              city={requirement.city}
+              cityTagline={requirement.cityTagline}
+              citySearch={citySearch}
+              onProvinceChange={(province) => {
+                const firstCity = getCitiesByProvince(province)[0]
+                applyCitySelection(province, firstCity?.city || "", firstCity?.tagline)
+                setCitySearch("")
+              }}
+              onCitySearchChange={setCitySearch}
+              onSelectCity={(city) =>
+                applyCitySelection(city.province, city.city, city.tagline)
+              }
+            />
+          </AppCard>
+        )}
+
+        {currentStep === 2 && (
+          <AppCard tone="elevated" padding="md">
+            <RequirementPicker requirement={requirement} onChange={setRequirement} />
+          </AppCard>
+        )}
+
+        {currentStep === 3 && (
+          <section className="space-y-3">
+            <AppCard tone="elevated" padding="md" className="bg-[var(--app-brand-soft)]/45">
+              <h3 className="text-base font-semibold text-[var(--app-text-strong)]">补充想去内容（可跳过）</h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--app-text-secondary)]">
+                这一步不是必须完成。你可以手动补充，也可以直接下一步交给系统自动推荐。
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <AppButton
+                  type="button"
+                  onClick={handleSkipStepThree}
+                  size="lg"
+                >
+                  跳过并继续
+                </AppButton>
+                <AppButton
+                  type="button"
+                  onClick={() => manualSearchInputRef.current?.focus()}
+                  size="lg"
+                  variant="secondary"
+                >
+                  继续手动添加
+                </AppButton>
+              </div>
+            </AppCard>
+
+            <AppCard tone="elevated" padding="md" className="space-y-4">
+              <RecommendedPoiSection
+                title="根据兴趣偏好推荐"
+                subtitle="按你的城市和兴趣优先匹配。"
+                items={recommendationBase.slice(0, 4)}
+                inCart={(spotId) => selectedPoiIdSet.has(spotId)}
+                onAdd={handleAddSpot}
+              />
+              <RecommendedPoiSection
+                title="根据节奏和预算推荐"
+                subtitle="慢节奏更注重体验，快节奏更注重效率。"
+                items={recommendationBase.slice(4, 8)}
+                inCart={(spotId) => selectedPoiIdSet.has(spotId)}
+                onAdd={handleAddSpot}
+              />
+            </AppCard>
+
+            <AppCard tone="elevated" padding="md">
+              <RecommendedBundles bundles={recommendedBundles} onAddBundle={handleAddBundle} />
+            </AppCard>
+
+            <AppCard tone="elevated" padding="md">
+              <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">手动搜索添加</h4>
+              <div className="mt-3">
+                <AppInput
+                  ref={manualSearchInputRef}
+                  type="text"
+                  value={manualSearch}
+                  onChange={(event) => setManualSearch(event.target.value)}
+                  placeholder="搜索景点、美食或住宿"
+                  tone="subtle"
+                />
+              </div>
+              <div className="mt-3 space-y-2">
+                {manualSearchResult.slice(0, 6).map((spot) => (
+                  <article
+                    key={spot.id}
+                    className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={resolvePlaceImage({
+                          id: spot.id,
+                          name: spot.name,
+                          city: spot.city,
+                          province: spot.province,
+                          image: spot.image,
+                          coverImage: spot.image,
+                        })}
+                        alt={spot.name}
+                        className="h-11 w-11 rounded-lg object-cover"
+                        onError={(event) => {
+                          event.currentTarget.src = resolvePlaceImage({
+                            city: spot.city,
+                            province: spot.province,
+                            name: spot.name,
+                          })
+                        }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
+                        <p className="mt-0.5 truncate text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddSpot(spot.id)}
+                        className={cn(
+                          "rounded-[0.65rem] px-2.5 py-1.5 text-xs font-medium",
+                          selectedPoiIdSet.has(spot.id)
+                            ? "bg-[var(--app-brand-soft)] text-[var(--app-brand)]"
+                            : "bg-[var(--app-brand)] text-white"
+                        )}
+                      >
+                        {selectedPoiIdSet.has(spot.id) ? "已加入" : "加入"}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </AppCard>
+
+            <AppCard tone="elevated" padding="md">
+              <PoiCart
+                selectedPois={selectedPois}
+                onRemove={(spotId) =>
+                  setSelectedPois((prev) => prev.filter((spot) => spot.id !== spotId))
+                }
+                onClear={() => setSelectedPois([])}
+              />
+              <p className="mt-3 rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-xs text-[var(--app-text-secondary)]">
+                {stepThreeStatusText}
+              </p>
+            </AppCard>
+          </section>
+        )}
+
+        {currentStep === 4 && (
+          <section className="space-y-3">
+            <AppCard tone="elevated" padding="md">
+              <h3 className="text-base font-semibold text-[var(--app-text-strong)]">确认并生成</h3>
+              <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
+                确认目的地、需求与导入内容后再生成方案。
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  目的地 <span className="font-medium text-[var(--app-text-strong)]">{requirement.city}</span>
+                </div>
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  天数 <span className="font-medium text-[var(--app-text-strong)]">{requirement.days} 天</span>
+                </div>
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  预算 <span className="font-medium text-[var(--app-text-strong)]">{requirement.budgetRange}</span>
+                </div>
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  同行 <span className="font-medium text-[var(--app-text-strong)]">{COMPANION_LABEL[requirement.companions]}</span>
+                </div>
+              </div>
+            </AppCard>
+
+            <PlannerDateFields
+              tripName={tripName}
+              departure={departure}
+              startDate={startDate}
+              endDate={endDate}
+              dayCount={requirement.days}
+              manualEndDate={manualEndDate}
+              dateError={dateError}
+              onTripNameChange={setTripName}
+              onDepartureChange={setDeparture}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              onManualEndDateChange={setManualEndDate}
+            />
+
+            {buildError && (
+              <article className="surface-error rounded-[var(--app-radius-lg)] border border-[color:rgba(187,85,75,0.35)] px-4 py-3 text-sm text-[var(--app-error)]">
+                {buildError}
+              </article>
             )}
-            <span>
-              {generatedPlan.generationStatus === "success"
-                ? "路线生成完成"
-                : generatedPlan.generationStatus === "partial"
-                ? "部分路段为预估"
-                : "路线生成异常，已降级"}
-            </span>
-          </div>
-          <h1 className="text-2xl font-bold text-primary-foreground">
-            {generatedPlan.name}
-          </h1>
-          <p className="text-primary-foreground/80 text-sm mt-1">
-            {generatedPlan.totalDays ?? 0} 天 · {generatedPlan.totalSpots ?? 0} 个地点
-          </p>
-        </header>
+          </section>
+        )}
 
-        <div className="px-6 -mt-2 space-y-4">
-          <ItinerarySummary plan={generatedPlan} />
+        {currentStep === 5 && generatedPlan && (
+          <section className="space-y-4">
+            <ItinerarySummary plan={generatedPlan} />
 
-          {generatedPlan.generationNotices && generatedPlan.generationNotices.length > 0 && (
-            <section className={cn("rounded-2xl p-4 text-xs leading-6", statusToneClass)}>
-              {generatedPlan.generationNotices.map((notice, index) => (
-                <p key={`${notice}-${index}`}>• {notice}</p>
-              ))}
-            </section>
-          )}
-
-          {generatedPlan.days && generatedPlan.days.length > 0 ? (
-            <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <h3 className="font-semibold text-foreground">当天地图路线</h3>
-                <span className="text-xs text-muted-foreground">
-                  与下方文字路线保持同顺序
-                </span>
+            <AppCard tone="elevated" padding="md" className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">阅读章节</h4>
+                  <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
+                    当前阅读：第{activeResultDay?.day || 1}天
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AppButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setIsEditMode((prev) => !prev)}
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    {isEditMode ? "退出编辑" : "进入编辑"}
+                  </AppButton>
+                  <AppButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleOptimizeCurrentDay()}
+                    disabled={isOptimizing}
+                  >
+                    <RefreshCcw className={cn("h-3.5 w-3.5", isOptimizing && "animate-spin")} />
+                    {isOptimizing ? "优化中" : "优化当天"}
+                  </AppButton>
+                  <AppButton type="button" variant="secondary" size="sm" onClick={() => setShareSheetOpen(true)}>
+                    <Share2 className="h-3.5 w-3.5" />
+                    分享摘要
+                  </AppButton>
+                </div>
               </div>
 
-              <div className="flex gap-2 overflow-x-auto pb-1 mb-3">
-                {generatedPlan.days.map((day, index) => (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {resultDays.map((day, index) => (
                   <button
                     key={day.day}
                     type="button"
-                    onClick={() => setSelectedDayIndex(index)}
+                    onClick={() => {
+                      handleResultDayChange(index)
+                      setFeedbackDay(day.day)
+                    }}
                     className={cn(
-                      "shrink-0 px-3 py-1.5 rounded-full text-xs border transition-colors",
-                      selectedDayIndex === index
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-secondary text-foreground border-transparent hover:bg-secondary/80"
+                      "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                      index === activeResultDayIndex
+                        ? "border-[var(--app-brand)] bg-[var(--app-brand)] text-white"
+                        : "border-[var(--app-line)] bg-[var(--app-surface)] text-[var(--app-text-secondary)]"
                     )}
                   >
-                    第 {day.day} 天
+                    第{day.day}天
                   </button>
                 ))}
               </div>
+            </AppCard>
 
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {modeOptions.map((option) => {
-                  const Icon = option.icon
-                  const active = mapMode === option.id
-                  return (
+            {activeResultDay && (
+              <>
+                <ResultDayHeader day={activeResultDay} />
+                <DayRouteMap
+                  days={resultDays}
+                  activeDayIndex={activeResultDayIndex}
+                  onDayChange={handleResultDayChange}
+                  showDayTabs={false}
+                  highlightedSpotId={activeMapSpotId}
+                  highlightedLegId={activeMapLegId}
+                  onSpotSelect={handleMapSpotSelect}
+                  onLegSelect={handleMapLegSelect}
+                  onModeChange={(mode) => {
+                    setActiveRouteMode(mode)
+                    setActiveMapLegId(null)
+                    if (activeResultDay) {
+                      setMapRouteLegOverrides((prev) => ({
+                        ...prev,
+                        [activeResultDay.day]: [],
+                      }))
+                    }
+                  }}
+                  onRouteLegsChange={({ dayIndex, mode, legs }) => {
+                    const day = resultDays[dayIndex]
+                    if (!day) return
+                    setMapRouteLegOverrides((prev) => ({
+                      ...prev,
+                      [day.day]: buildDisplayRouteLegsForDay(day, mode, legs),
+                    }))
+                  }}
+                />
+                <DailyRouteCard
+                  day={activeResultDay}
+                  showDayHeader={false}
+                  highlightedSpotId={activeMapSpotId}
+                  highlightedLegId={activeMapLegId}
+                  onSpotClick={(spotId) => {
+                    setActiveMapSpotId(spotId)
+                    setActiveMapLegId(null)
+                  }}
+                  onLegClick={(legId) => setActiveMapLegId(legId)}
+                  domIdPrefix={`result-day-${activeResultDay.day}`}
+                  routeLegsOverride={activeRouteLegsOverride}
+                  displayMode={activeRouteMode}
+                  editable={isEditMode}
+                  lockedSpotIds={generatedPlan.lockedSpotIds || []}
+                  onMoveSpot={(spotId, direction) => {
+                    void handleMoveSpot(spotId, direction)
+                  }}
+                  onReplaceSpot={(spotId) => {
+                    setActiveEditSpotId(spotId)
+                    setReplaceSpotSheetOpen(true)
+                  }}
+                  onToggleSpotLock={handleToggleSpotLock}
+                  onReplaceMeal={(mealType) => {
+                    setActiveMealType(mealType)
+                    setReplaceFoodSheetOpen(true)
+                  }}
+                  onReplaceHotel={() => setReplaceHotelSheetOpen(true)}
+                  onOptimizeDay={() => void handleOptimizeCurrentDay()}
+                />
+                <ResultBudgetSummary day={activeResultDay} />
+              </>
+            )}
+
+            <details className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--app-text-primary)]">
+                查看诊断与质量评分（辅助信息）
+              </summary>
+              <div className="mt-3">
+                <ResultDiagnosticsPanel
+                  validationResult={generatedPlan.validationResult}
+                  qualityScore={generatedPlan.qualityScore}
+                  notices={generationNotices}
+                  onAutoOptimize={() => void handleOptimizeCurrentDay()}
+                />
+              </div>
+            </details>
+
+            <details className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--app-text-strong)]">
+                反馈并局部优化
+              </summary>
+              <div className="mt-3">
+                <p className="text-xs text-[var(--app-text-secondary)]">
+                  你的反馈会触发当天或局部模块的优化，而不是整份方案重来。
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {[
+                    { value: "satisfied", label: "满意" },
+                    { value: "neutral", label: "一般" },
+                    { value: "unsatisfied", label: "不满意" },
+                  ].map((item) => (
                     <button
-                      key={option.id}
+                      key={item.value}
                       type="button"
-                      onClick={() => {
-                        setMapMode(option.id)
-                        setMapSummary((prev) => ({ ...prev, mode: option.id }))
-                      }}
+                      onClick={() => setFeedbackSentiment(item.value as PlanFeedbackSentiment)}
                       className={cn(
-                        "rounded-xl px-2 py-2 text-xs border transition-colors",
-                        active
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-secondary/70 text-foreground border-transparent"
+                        "rounded-[var(--app-radius-sm)] border px-2 py-2 text-xs",
+                        feedbackSentiment === item.value
+                          ? "border-[var(--app-brand)] bg-[var(--app-brand-soft)] text-[var(--app-brand)]"
+                          : "border-[var(--app-line)] bg-[var(--app-surface)] text-[var(--app-text-secondary)]"
                       )}
                     >
-                      <Icon className="w-4 h-4 mx-auto mb-1" />
-                      {option.label}
+                      {item.label}
                     </button>
-                  )
-                })}
-              </div>
-
-              {selectedDay ? (
-                <>
-                  <MapView
-                    spots={selectedDay.spots}
-                    transportMode={mapMode}
-                    routeMode="trip"
-                    onSummaryChange={setMapSummary}
-                  />
-                  <div className="mt-3 rounded-xl bg-secondary/40 p-3 text-xs">
-                    <div className="flex items-center justify-between text-muted-foreground">
-                      <span>总距离：{mapSummary.distanceText}</span>
-                      <span>预计耗时：{mapSummary.durationText}</span>
-                    </div>
-                    <p className="mt-2 text-muted-foreground">{mapSummary.message}</p>
-                    {mapSummary.fallbackRouteUrl &&
-                      (mapSummary.status === "route-error" ||
-                        mapSummary.status === "map-error" ||
-                        mapSummary.status === "transit-degraded") && (
-                        <button
-                          type="button"
-                          onClick={() => openRouteInAmapWeb(mapSummary.fallbackRouteUrl || "")}
-                          className="mt-2 w-full py-2 rounded-lg bg-primary text-primary-foreground font-medium"
-                        >
-                          打开高德地图导航（兜底）
-                        </button>
-                      )}
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-xl bg-secondary/40 p-4 text-sm text-muted-foreground">
-                  当前没有可展示的日程路线
+                  ))}
                 </div>
-              )}
-            </section>
-          ) : (
-            <section className="bg-card rounded-2xl border border-border/60 p-5 text-sm text-muted-foreground">
-              未生成任何可展示的每日行程，请返回重新规划。
-            </section>
-          )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[
+                    { id: "dislike_restaurant", label: "餐厅不喜欢" },
+                    { id: "dislike_hotel", label: "酒店不合适" },
+                    { id: "day_too_tight", label: "当天太赶" },
+                    { id: "day_too_loose", label: "当天太松" },
+                    { id: "lower_budget", label: "更省钱" },
+                    { id: "more_food", label: "更多美食" },
+                    { id: "more_relaxed", label: "更轻松" },
+                    { id: "refresh_route", label: "重排路线" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => toggleFeedbackTag(item.id as PlanFeedbackTag)}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs",
+                        feedbackTags.includes(item.id as PlanFeedbackTag)
+                          ? "bg-[var(--app-brand)] text-white"
+                          : "bg-[var(--app-surface)] text-[var(--app-text-secondary)]"
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2">
+                  <AppInput
+                    value={feedbackComment}
+                    onChange={(event) => setFeedbackComment(event.target.value)}
+                    placeholder="可选：补充你的反馈细节"
+                    tone="subtle"
+                  />
+                </div>
+                <AppButton
+                  type="button"
+                  className="mt-2"
+                  variant="secondary"
+                  onClick={() => void handleSubmitFeedback()}
+                  disabled={feedbackTags.length === 0}
+                >
+                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                  提交反馈并局部优化
+                </AppButton>
+              </div>
+            </details>
 
-          <section className="space-y-4">
-            <h2 className="text-lg font-semibold text-foreground">每日详细时间线</h2>
-            {(generatedPlan.days || []).map((day) => (
-              <DailyRouteCard key={day.day} day={day} />
-            ))}
-          </section>
-
-          <section className="flex gap-3 pt-2">
-            <button
+            <div className="grid grid-cols-3 gap-2">
+              <AppButton
+                type="button"
+                onClick={() => setCurrentStep(4)}
+                variant="secondary"
+                size="lg"
+              >
+                返回调整
+              </AppButton>
+              <AppButton type="button" onClick={handleSavePlan} size="lg">
+                <Save className="h-4 w-4" />
+                保存方案
+              </AppButton>
+              <AppButton type="button" variant="secondary" size="lg" onClick={() => setShareSheetOpen(true)}>
+                <Share2 className="h-4 w-4" />
+                分享
+              </AppButton>
+            </div>
+            <AppButton
               type="button"
-              onClick={handleReset}
-              className="flex-1 py-3 rounded-xl bg-secondary text-foreground font-medium hover:bg-secondary/80 transition-colors flex items-center justify-center gap-2"
+              onClick={() => onNavigate("trips")}
+              variant="secondary"
+              size="lg"
+              className="w-full"
             >
-              <RefreshCcw className="w-4 h-4" />
-              重新规划
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              保存行程
-            </button>
+              返回行程清单
+            </AppButton>
           </section>
-        </div>
+        )}
 
-        {showSaveSuccess && (
-          <div className="fixed bottom-28 left-1/2 -translate-x-1/2 rounded-xl bg-foreground text-background px-5 py-2.5 text-sm shadow-lg">
-            已保存到我的行程
-          </div>
+        {currentStep !== 5 && (
+          <AppCard tone="elevated" padding="sm">
+            <div className="flex items-center justify-between gap-2">
+              <AppButton
+                type="button"
+                onClick={() => {
+                  closeActiveField()
+                  setCurrentStep((prev) => Math.max(1, prev - 1))
+                }}
+                disabled={currentStep === 1 || isGenerating}
+                variant="secondary"
+                size="md"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                上一步
+              </AppButton>
+              <AppButton
+                type="button"
+                onClick={handleNext}
+                disabled={!canGoNext || isGenerating}
+                size="md"
+              >
+                {currentStep === 4 ? (
+                  isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      正在生成方案...
+                    </>
+                  ) : (
+                    <>
+                      生成专属行程
+                      <Sparkles className="h-4 w-4" />
+                    </>
+                  )
+                ) : (
+                  <>
+                    下一步
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </AppButton>
+            </div>
+          </AppCard>
+        )}
+
+        {currentStep !== 5 && (
+          <PlannerSummaryBar
+            requirement={requirement}
+            selectedPois={selectedPois}
+            actionText={currentStep === 3 ? "跳过并继续" : undefined}
+            onAction={currentStep === 3 ? handleSkipStepThree : undefined}
+            disabled={isGenerating}
+          />
         )}
       </div>
-    )
-  }
 
-  return (
-    <div className="min-h-screen pb-24 animate-fade-in">
-      <header className="px-6 pt-12 pb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
+      <PlannerConflictDialog
+        open={Boolean(pendingCity)}
+        targetCity={pendingCity?.city || requirement.city}
+        mismatched={pendingCity?.mismatched || []}
+        onKeepMatched={() => {
+          if (!pendingCity) return
+          setSelectedPois((prev) =>
+            filterSpotsByCity(prev, pendingCity.city, pendingCity.province)
+          )
+          setRequirement((prev) => ({
+            ...prev,
+            province: pendingCity.province,
+            city: pendingCity.city,
+            cityTagline: pendingCity.cityTagline,
+          }))
+          setPendingCity(null)
+        }}
+        onClearAll={() => {
+          if (!pendingCity) return
+          setSelectedPois([])
+          setRequirement((prev) => ({
+            ...prev,
+            province: pendingCity.province,
+            city: pendingCity.city,
+            cityTagline: pendingCity.cityTagline,
+          }))
+          setPendingCity(null)
+        }}
+        onBackToEdit={() => setPendingCity(null)}
+      />
+
+      <ReplacePlaceSheet
+        open={replaceSpotSheetOpen}
+        onClose={() => setReplaceSpotSheetOpen(false)}
+        candidates={replaceSpotCandidates}
+        currentName={activeResultDay?.spots.find((spot) => spot.id === activeEditSpotId)?.name}
+        locked={Boolean(activeEditSpotId && (generatedPlan?.lockedSpotIds || []).includes(activeEditSpotId))}
+        onReplace={(candidate) => {
+          void handleReplaceSpotCandidate(candidate)
+        }}
+      />
+
+      <ReplaceFoodSheet
+        open={replaceFoodSheetOpen}
+        onClose={() => setReplaceFoodSheetOpen(false)}
+        mealType={activeMealType}
+        candidates={replaceFoodCandidates}
+        onReplace={handleReplaceMealCandidate}
+      />
+
+      <ReplaceHotelSheet
+        open={replaceHotelSheetOpen}
+        onClose={() => setReplaceHotelSheetOpen(false)}
+        candidates={replaceHotelCandidates}
+        onReplace={handleReplaceHotelCandidate}
+      />
+
+      <MobileSheet
+        open={shareSheetOpen}
+        onClose={() => setShareSheetOpen(false)}
+        title="分享摘要"
+        description="用于复制展示给同伴，不会泄露隐私设置。"
+      >
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-[var(--app-text-strong)]">
+            {shareSummary?.title || generatedPlan?.name}
+          </p>
+          <p className="text-xs text-[var(--app-text-secondary)]">
+            {shareSummary?.destination || "北京"} · {shareSummary?.dayCount || 0} 天 ·{" "}
+            {shareSummary?.totalSpots || 0} 个点位
+          </p>
+          <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-xs text-[var(--app-text-secondary)] whitespace-pre-wrap">
+            {shareSummary ? toShareSummaryText(shareSummary) : ""}
           </div>
-          <h1 className="text-2xl font-bold text-foreground">AI智能规划</h1>
+          <AppButton type="button" className="w-full" onClick={() => void handleShareSummary()}>
+            <Share2 className="h-4 w-4" />
+            复制摘要
+          </AppButton>
         </div>
-        <p className="text-muted-foreground">生成详细时间线与导航路线</p>
-      </header>
+      </MobileSheet>
 
-      <div className="px-6 space-y-5">
-        <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-foreground">已选景点</h2>
-            <span className="text-sm text-primary font-medium">{selectedSpots.length} 个</span>
-          </div>
-          <div className="mt-3 flex -space-x-3">
-            {selectedSpots.slice(0, 6).map((spot) => (
-              <img
-                key={spot.id}
-                src={spot.image}
-                alt={spot.name}
-                className="w-11 h-11 rounded-full border-2 border-card object-cover"
-              />
-            ))}
-            {selectedSpots.length > 6 && (
-              <div className="w-11 h-11 rounded-full border-2 border-card bg-secondary flex items-center justify-center text-xs font-semibold text-muted-foreground">
-                +{selectedSpots.length - 6}
-              </div>
-            )}
-          </div>
-          <div className="mt-3 text-xs text-muted-foreground flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-primary" />
-            当前门票合计约 ¥{totalTicketPrice}
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigate("trips")}
-            className="mt-3 text-sm text-primary font-medium inline-flex items-center gap-1"
-          >
-            去管理行程点
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </section>
-
-        <section className="space-y-3">
-          <label className="text-sm font-medium text-foreground">行程名称</label>
-          <input
-            type="text"
-            placeholder="例如：北京三日路线"
-            value={settings.tripName}
-            onChange={(event) =>
-              setSettings((prev) => ({ ...prev, tripName: event.target.value }))
-            }
-            className="w-full rounded-xl bg-secondary px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-        </section>
-
-        <section className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">开始日期</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="date"
-                value={settings.startDate}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, startDate: event.target.value }))
-                }
-                className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">结束日期</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="date"
-                value={settings.endDate}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, endDate: event.target.value }))
-                }
-                className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <label className="text-sm font-medium text-foreground">出发地/酒店</label>
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="例如：北京饭店"
-              value={settings.departure}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, departure: event.target.value }))
-              }
-              className="w-full rounded-xl bg-secondary py-3 pl-10 pr-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <label className="text-sm font-medium text-foreground">行程节奏</label>
-          <div className="grid grid-cols-3 gap-2">
-            {paceOptions.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setSettings((prev) => ({ ...prev, pace: option.id }))}
-                className={cn(
-                  "rounded-xl border px-2 py-3 text-xs transition-colors",
-                  settings.pace === option.id
-                    ? "bg-primary/10 text-primary border-primary/40"
-                    : "bg-card text-foreground border-border"
-                )}
-              >
-                <p className="font-semibold">{option.label}</p>
-                <p className="text-[11px] mt-1 text-muted-foreground">{option.desc}</p>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <label className="text-sm font-medium text-foreground">默认出行方式</label>
-          <div className="grid grid-cols-3 gap-2">
-            {modeOptions.map((option) => {
-              const Icon = option.icon
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() =>
-                    setSettings((prev) => ({ ...prev, transportMode: option.id }))
-                  }
-                  className={cn(
-                    "rounded-xl border px-2 py-2 text-xs transition-colors",
-                    settings.transportMode === option.id
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-secondary/70 text-foreground border-transparent"
-                  )}
-                >
-                  <Icon className="w-4 h-4 mx-auto mb-1" />
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        <button
-          type="button"
-          onClick={handleGenerate}
-          className="w-full py-4 rounded-xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-medium hover:opacity-90 transition-opacity btn-press flex items-center justify-center gap-2"
-        >
-          <Sparkles className="w-5 h-5" />
-          生成详细行程路线
-        </button>
-      </div>
+      {showSaveSuccess && (
+        <div className="fixed left-1/2 top-20 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-[var(--app-radius-sm)] bg-[var(--app-text-strong)] px-4 py-2 text-sm text-white shadow-lg">
+          <CheckCircle2 className="h-4 w-4" />
+          行程已保存
+        </div>
+      )}
+      {shareFeedback && (
+        <div className="fixed left-1/2 top-32 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-[var(--app-radius-sm)] bg-[var(--app-text-strong)] px-4 py-2 text-sm text-white shadow-lg">
+          {shareFeedback}
+        </div>
+      )}
     </div>
   )
 }

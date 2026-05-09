@@ -1,0 +1,26 @@
+{
+  "bj-spot-palace-museum": {
+    "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Forbidden_City_Beijing_Shenwumen_Gate.JPG/1280px-Forbidden_City_Beijing_Shenwumen_Gate.JPG",
+    "source": "beijing-curated",
+    "confidence": "exact",
+    "city": "北京"
+  },
+  "bj-spot-temple-of-heaven": {
+    "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Temple_of_Heaven%2C_Beijing%2C_China.jpg/1280px-Temple_of_Heaven%2C_Beijing%2C_China.jpg",
+    "source": "beijing-curated",
+    "confidence": "exact",
+    "city": "北京"
+  },
+  "bj-spot-summer-palace": {
+    "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Summer_Palace_Beijing.jpg/1280px-Summer_Palace_Beijing.jpg",
+    "source": "beijing-curated",
+    "confidence": "exact",
+    "city": "北京"
+  },
+  "bj-city-default": {
+    "src": "https://images.unsplash.com/photo-1510663109653-ec2a22b4f45f?auto=format&fit=crop&w=1600&q=80",
+    "source": "beijing-curated",
+    "confidence": "city_related",
+    "city": "北京"
+  }
+}

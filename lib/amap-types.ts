@@ -28,10 +28,24 @@ export interface AMapBoundsInstance {
 export interface AMapMarkerInstance {
   setMap: (map: AMapMapInstance | null) => void
   setPosition: (position: LngLatTuple) => void
+  setContent?: (content: string | HTMLElement) => void
+  setLabel?: (label: { content: string; direction?: "top" | "right" | "bottom" | "left"; offset?: unknown }) => void
+  setzIndex?: (zIndex: number) => void
+  getPosition?: () => unknown
+  on?: (eventName: string, handler: (event?: unknown) => void) => void
+  off?: (eventName: string, handler: (event?: unknown) => void) => void
 }
 
 export interface AMapPolylineInstance {
   setMap: (map: AMapMapInstance | null) => void
+  setOptions?: (options: {
+    strokeColor?: string
+    strokeWeight?: number
+    strokeOpacity?: number
+    strokeStyle?: "solid" | "dashed"
+  }) => void
+  on?: (eventName: string, handler: (event?: unknown) => void) => void
+  off?: (eventName: string, handler: (event?: unknown) => void) => void
 }
 
 export interface AMapRouteStep {
@@ -162,13 +176,22 @@ export interface AMapNamespace {
     offset?: unknown
     icon?: unknown
     zIndex?: number
+    content?: string | HTMLElement
+    label?: {
+      content: string
+      direction?: "top" | "right" | "bottom" | "left"
+      offset?: unknown
+    }
   }) => AMapMarkerInstance
   Polyline: new (options: {
     path: LngLatTuple[]
     strokeColor?: string
     strokeWeight?: number
+    strokeOpacity?: number
+    strokeStyle?: "solid" | "dashed"
     lineJoin?: "round" | "miter" | "bevel"
     showDir?: boolean
+    zIndex?: number
   }) => AMapPolylineInstance
   Icon: new (options: { size: unknown; image: string }) => unknown
   Size: new (width: number, height: number) => unknown

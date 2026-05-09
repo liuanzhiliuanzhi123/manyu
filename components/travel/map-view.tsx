@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Loader2, LocateFixed, MapPin } from "lucide-react"
@@ -10,19 +10,26 @@ import {
   getSpotLngLat,
   resolveSpotCoordinates,
 } from "@/lib/amap-spot-utils"
+import {
+  aggregateRouteLegs,
+  createEstimatedLeg,
+  haversineDistanceMeters,
+  type RouteLegResult,
+} from "@/lib/amap-route-utils"
 import { analyzeAmapError } from "@/lib/amap-error-utils"
 import { buildAmapRouteUrl } from "@/lib/open-map-route"
+import { requestRouteLegByWebService } from "@/lib/amap-webservice-client"
+import {
+  createMapLabelHtml,
+  createMapMarkerHtml,
+  getRouteStrokeStyle,
+  shouldRenderMarkerLabel,
+} from "@/lib/map-layout-utils"
 import type {
-  AMapDrivingInstance,
   AMapMapInstance,
   AMapMarkerInstance,
   AMapNamespace,
   AMapPolylineInstance,
-  AMapRoute,
-  AMapRouteResult,
-  AMapTransferInstance,
-  AMapTransferResult,
-  AMapWalkingInstance,
   LngLatTuple,
 } from "@/lib/amap-types"
 import type { NavigationMode } from "@/lib/navigation"
@@ -35,6 +42,9 @@ export type RouteSummaryStatus =
   | "empty"
   | "single"
   | "success"
+  | "partial-success"
+  | "fallback"
+  | "error"
   | "partial-error"
   | "route-error"
   | "map-error"
@@ -63,17 +73,40 @@ interface MapViewProps {
   fromMeTarget?: Spot | null
   fromMeOrigin?: LngLatTuple | null
   fromMeRequestId?: string
+  routeSegmentIds?: string[]
+  highlightedSpotId?: string | null
+  highlightedSegmentId?: string | null
+  onSpotClick?: (spotId: string) => void
+  onSegmentClick?: (segmentId: string) => void
   onSummaryChange?: (summary: RouteSummaryInfo) => void
+  onRouteLegsChange?: (legs: RouteLegResult[]) => void
 }
 
 const CENTER_BEIJING: LngLatTuple = [116.397428, 39.90923]
 const DEFAULT_DISTANCE_TEXT = "--"
 const DEFAULT_DURATION_TEXT = "--"
+const EMPTY_ROUTE_SEGMENT_IDS: string[] = []
+const AMAP_LOAD_TIMEOUT_MS = 12000
 
-const MARKER_COLORS = {
-  start: "#2D8C59",
-  end: "#EF4444",
-  waypoint: "#2D5A47",
+interface MarkerMeta {
+  spotId: string
+  marker: AMapMarkerInstance
+  index: number
+  total: number
+  name: string
+  type: Spot["type"]
+  isStart: boolean
+  isEnd: boolean
+  isKeyStop: boolean
+}
+
+interface SegmentMeta {
+  id: string
+  mode: TransportMode
+  status: RouteLegResult["status"]
+  fromSpotId: string
+  toSpotId: string
+  polylines: AMapPolylineInstance[]
 }
 
 type UserLocationStatus =
@@ -124,61 +157,11 @@ function createSummary(
   }
 }
 
-function toRoutePath(route: AMapRoute): LngLatTuple[] {
-  const points: LngLatTuple[] = []
-  const steps = route.steps ?? []
-
-  for (const step of steps) {
-    const stepPath = step.path ?? []
-    for (const point of stepPath) {
-      const lng = Number(
-        typeof point.getLng === "function" ? point.getLng() : point.lng
-      )
-      const lat = Number(
-        typeof point.getLat === "function" ? point.getLat() : point.lat
-      )
-      if (Number.isFinite(lng) && Number.isFinite(lat)) {
-        points.push([lng, lat])
-      }
-    }
-  }
-  return points
-}
-
-function getRouteSummary(route: AMapRoute) {
-  const distance = Number(route.distance ?? 0)
-  const duration = Number(route.time ?? route.duration ?? 0)
-
-  return {
-    distance: Number.isFinite(distance) ? distance : 0,
-    duration: Number.isFinite(duration) ? duration : 0,
-  }
-}
-
-function createMarkerIcon(
-  AMap: AMapNamespace,
-  label: string,
-  color: string
-): unknown {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42">
-      <path d="M17 41c-1 0-2-.4-2.7-1.2C6 31 1 23.8 1 16.5 1 7.9 8 1 17 1s16 6.9 16 15.5c0 7.3-5 14.5-13.3 23.3-.7.8-1.7 1.2-2.7 1.2z" fill="${color}" stroke="#ffffff" stroke-width="2"/>
-      <circle cx="17" cy="16" r="9" fill="#ffffff" />
-      <text x="17" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="${color}">${label}</text>
-    </svg>
-  `.trim()
-
-  return new AMap.Icon({
-    size: new AMap.Size(34, 42),
-    image: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-  })
-}
-
 function createUserLocationIcon(AMap: AMapNamespace): unknown {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
-      <circle cx="10" cy="10" r="9" fill="#2563EB" fill-opacity="0.25" />
-      <circle cx="10" cy="10" r="5" fill="#2563EB" stroke="#ffffff" stroke-width="2" />
+      <circle cx="10" cy="10" r="9" fill="#5d6f2f" fill-opacity="0.26" />
+      <circle cx="10" cy="10" r="5" fill="#5d6f2f" stroke="#ffffff" stroke-width="2" />
     </svg>
   `.trim()
 
@@ -195,7 +178,7 @@ function getUserLocationStatusText(
   if (status === "locating") return "正在获取当前位置..."
   if (status === "active") return "已开启实时定位"
   if (status === "approximate") return "已获取网络定位（精度较低）"
-  if (status === "denied") return "定位权限已拒绝，请在浏览器允许定位"
+  if (status === "denied") return "定位权限已拒绝，请在浏览器中允许定位"
   if (status === "unsupported") return "当前浏览器不支持定位"
   if (status === "error") return errorText || "定位失败，请稍后重试"
   return "未开启定位"
@@ -287,6 +270,22 @@ function normalizeLocationError(error: unknown): {
   }
 }
 
+async function withTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  try {
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+    })
+    return await Promise.race([task, timeoutPromise])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
 function toNumber(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
@@ -343,68 +342,6 @@ function extractLngLatFromUnknown(payload: unknown): LngLatTuple | null {
   return null
 }
 
-interface DrivingSearchOutcome {
-  distance: number
-  duration: number
-  path: LngLatTuple[]
-  source: "plugin" | "rest"
-  message?: string
-}
-
-interface AmapDrivingRestStep {
-  polyline?: string
-}
-
-interface AmapDrivingRestPath {
-  distance?: string
-  duration?: string
-  steps?: AmapDrivingRestStep[]
-}
-
-interface AmapDrivingRestResponse {
-  status?: string
-  info?: string
-  infocode?: string
-  route?: {
-    paths?: AmapDrivingRestPath[]
-  }
-}
-
-function getServiceInfoText(result: unknown) {
-  if (!result) return ""
-  if (typeof result === "string") return result
-  if (typeof result !== "object") return ""
-  const payload = result as Record<string, unknown>
-  return String(payload.info || payload.message || payload.error || "").trim()
-}
-
-function parsePolylineText(polylineText: string): LngLatTuple[] {
-  if (!polylineText.trim()) return []
-  const points: LngLatTuple[] = []
-  const chunks = polylineText.split(";")
-  for (const chunk of chunks) {
-    const [lngText, latText] = chunk.split(",")
-    const lng = Number(lngText)
-    const lat = Number(latText)
-    if (Number.isFinite(lng) && Number.isFinite(lat)) {
-      points.push([lng, lat])
-    }
-  }
-  return points
-}
-
-function dedupePath(path: LngLatTuple[]) {
-  if (path.length <= 1) return path
-  const deduped: LngLatTuple[] = [path[0]]
-  for (let i = 1; i < path.length; i += 1) {
-    const previous = deduped[deduped.length - 1]
-    const current = path[i]
-    if (previous[0] === current[0] && previous[1] === current[1]) continue
-    deduped.push(current)
-  }
-  return deduped
-}
-
 function buildFromMeFallbackUrl(
   mode: TransportMode,
   destination: LngLatTuple,
@@ -435,166 +372,235 @@ function buildTripFallbackUrl(mode: TransportMode, spots: Spot[]) {
   })
 }
 
-async function requestDrivingByRestApi(
-  start: LngLatTuple,
-  end: LngLatTuple,
-  waypoints: LngLatTuple[]
-): Promise<DrivingSearchOutcome> {
-  const amapKey = process.env.NEXT_PUBLIC_AMAP_KEY?.trim()
-  if (!amapKey) {
-    throw new Error("未配置有效的高德地图 Key（NEXT_PUBLIC_AMAP_KEY）")
-  }
+const WALKING_MAX_DIRECT_METERS = 12000
 
-  const query = new URLSearchParams({
-    key: amapKey,
-    origin: `${start[0]},${start[1]}`,
-    destination: `${end[0]},${end[1]}`,
-    strategy: "0",
-    extensions: "base",
-  })
-  if (waypoints.length > 0) {
-    query.set(
-      "waypoints",
-      waypoints.map((item) => `${item[0]},${item[1]}`).join("|")
+function createLegPolylines(
+  AMap: AMapNamespace,
+  mode: TransportMode,
+  leg: RouteLegResult,
+  highlighted = false
+) {
+  const stroke = getRouteStrokeStyle(mode, leg.status, highlighted)
+  const paths = leg.polylinePaths ?? []
+  return paths
+    .filter((path) => path.length >= 2)
+    .map(
+      (path) =>
+        new AMap.Polyline({
+          path,
+          strokeColor: stroke.strokeColor,
+          strokeWeight: stroke.strokeWeight,
+          strokeOpacity: stroke.strokeOpacity,
+          strokeStyle: stroke.strokeStyle,
+          lineJoin: "round",
+          showDir: true,
+          zIndex: highlighted ? 130 : 100,
+        })
     )
-  }
+}
 
-  const response = await fetch(
-    `https://restapi.amap.com/v3/direction/driving?${query.toString()}`
+function applyMarkerVisual(meta: MarkerMeta, selectedSpotId: string | null) {
+  const isSelected = meta.spotId === selectedSpotId
+  meta.marker.setContent?.(
+    createMapMarkerHtml({
+      order: meta.index + 1,
+      type: meta.type,
+      isStart: meta.isStart,
+      isEnd: meta.isEnd,
+      isSelected,
+      isKeyStop: meta.isKeyStop,
+    })
   )
-  if (!response.ok) {
-    throw new Error("高德网络路线服务请求失败")
+
+  const shouldShowLabel = shouldRenderMarkerLabel({
+    index: meta.index,
+    total: meta.total,
+    isSelected,
+    isStart: meta.isStart,
+    isEnd: meta.isEnd,
+    isKeyStop: meta.isKeyStop,
+  })
+
+  if (shouldShowLabel) {
+    meta.marker.setLabel?.({
+      content: createMapLabelHtml({
+        name: meta.name,
+        type: meta.type,
+        isSelected,
+      }),
+      direction: "top",
+      offset: { x: 0, y: -8 },
+    })
+  } else {
+    meta.marker.setLabel?.({ content: "" })
   }
 
-  const payload = (await response.json()) as AmapDrivingRestResponse
-  if (payload.status !== "1" || !payload.route?.paths?.length) {
-    const analysis = analyzeAmapError(
-      `${payload.info || ""} ${payload.infocode || ""}`,
-      payload.info || "高德网络路线规划失败"
-    )
-    throw new Error(analysis.userMessage)
-  }
-
-  const pathResult = payload.route.paths[0]
-  const distance = Number(pathResult.distance || 0)
-  const duration = Number(pathResult.duration || 0)
-
-  const rawPath =
-    pathResult.steps?.flatMap((step) => parsePolylineText(step.polyline || "")) || []
-  const dedupedPath = dedupePath(rawPath)
-
-  return {
-    distance: Number.isFinite(distance) ? distance : 0,
-    duration: Number.isFinite(duration) ? duration : 0,
-    path: dedupedPath.length >= 2 ? dedupedPath : [start, end],
-    source: "rest",
-  }
+  meta.marker.setzIndex?.(isSelected ? 180 : meta.isStart || meta.isEnd ? 150 : 120)
 }
 
-function runDrivingSearch(
-  driving: AMapDrivingInstance,
+function ensureLngLat(payload: unknown): LngLatTuple | null {
+  if (!payload || typeof payload !== "object") return null
+  const record = payload as Record<string, unknown>
+  const lng = Number(record.lng ?? (typeof record.getLng === "function" ? record.getLng() : NaN))
+  const lat = Number(record.lat ?? (typeof record.getLat === "function" ? record.getLat() : NaN))
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  return [lng, lat]
+}
+
+function getAggregateMessage(mode: TransportMode, aggregate: ReturnType<typeof aggregateRouteLegs>) {
+  if (aggregate.state === "success") {
+    if (mode === "walking") return "步行路线规划完成"
+    if (mode === "transit") return "公交换乘路线规划完成"
+    return "驾车路线规划完成"
+  }
+  if (aggregate.state === "partial-success") {
+    if (mode === "walking") return "部分步行路段为预估，已合并展示总距离和用时"
+    if (mode === "transit") return "部分路段暂无公交方案，已按预估通勤时间展示"
+    return "部分驾车路段规划失败，已按预估通勤时间展示"
+  }
+  if (aggregate.state === "fallback") {
+    if (mode === "walking") return "步行路段距离较远或无可用方案，已按预估时间展示"
+    if (mode === "transit") return "当前路线暂无稳定公交方案，已按预估通勤时间展示"
+    return "驾车路线接口异常，已按预估通勤时间展示"
+  }
+  if (mode === "transit") return "公交路线规划失败，请尝试切换驾车或步行"
+  return "路线规划失败，请稍后重试"
+}
+
+function getSummaryStatusFromAggregate(
+  aggregate: ReturnType<typeof aggregateRouteLegs>
+): RouteSummaryStatus {
+  if (aggregate.state === "success") return "success"
+  if (aggregate.state === "partial-success") return "partial-success"
+  if (aggregate.state === "fallback") return "fallback"
+  return "error"
+}
+
+async function planDrivingLeg(
   start: LngLatTuple,
   end: LngLatTuple,
-  waypoints: LngLatTuple[]
-) {
-  const buildFailureMessage = (status: string, result: unknown) => {
-    const info = `${status} ${getServiceInfoText(result)}`
-    const analysis = analyzeAmapError(info, "高德驾车路线规划失败")
-    return analysis.userMessage
+  fromName: string,
+  toName: string
+): Promise<RouteLegResult> {
+  const directDistance = haversineDistanceMeters(start, end)
+  try {
+    const result = await requestRouteLegByWebService("driving", {
+      origin: start,
+      destination: end,
+      fromName,
+      toName,
+    })
+    if (result.status === "success") {
+      return result
+    }
+    throw new Error(result.message || "驾车路线规划失败")
+  } catch (error) {
+    const analysis = analyzeAmapError(error, "驾车路段规划失败，已自动预估")
+    const fallbackLeg = createEstimatedLeg({
+      fromName,
+      toName,
+      mode: "driving",
+      directDistanceMeters: directDistance,
+      message: analysis.userMessage,
+      multiplier: 1.25,
+    })
+    return {
+      ...fallbackLeg,
+      polylinePaths: [[start, end]],
+    }
+  }
+}
+
+async function planWalkingLeg(
+  start: LngLatTuple,
+  end: LngLatTuple,
+  fromName: string,
+  toName: string
+): Promise<RouteLegResult> {
+  const directDistance = haversineDistanceMeters(start, end)
+  if (directDistance > WALKING_MAX_DIRECT_METERS) {
+    const fallbackLeg = createEstimatedLeg({
+      fromName,
+      toName,
+      mode: "walking",
+      directDistanceMeters: directDistance,
+      message: "该路段距离较远，不适合步行，已按预估步行时间展示",
+      multiplier: 1.1,
+    })
+    return {
+      ...fallbackLeg,
+      polylinePaths: [[start, end]],
+    }
   }
 
-  const runDrivingByPlugin = () =>
-    new Promise<DrivingSearchOutcome>((resolve, reject) => {
-      const callback = (status: string, result: unknown) => {
-        const typedResult =
-          result && typeof result === "object"
-            ? (result as AMapRouteResult)
-            : undefined
-        if (status === "complete" && typedResult?.routes?.length) {
-          const route = typedResult.routes[0]
-          const summary = getRouteSummary(route)
-          const path = dedupePath(toRoutePath(route))
-          resolve({
-            distance: summary.distance,
-            duration: summary.duration,
-            path,
-            source: "plugin",
-          })
-          return
-        }
-        reject(new Error(buildFailureMessage(status, result)))
-      }
-
-      if (waypoints.length > 0) {
-        driving.search(start, end, { waypoints }, callback)
-        return
-      }
-
-      driving.search(start, end, callback)
+  try {
+    const result = await requestRouteLegByWebService("walking", {
+      origin: start,
+      destination: end,
+      fromName,
+      toName,
     })
-
-  return runDrivingByPlugin().catch(async (pluginError) => {
-    try {
-      const restResult = await requestDrivingByRestApi(start, end, waypoints)
-      return {
-        ...restResult,
-        message:
-          pluginError instanceof Error
-            ? `JS 规划失败，已自动切换网络规划：${pluginError.message}`
-            : "JS 规划失败，已自动切换网络规划",
-      }
-    } catch (restError) {
-      const pluginMessage =
-        pluginError instanceof Error ? pluginError.message : "JS 规划失败"
-      const restMessage =
-        restError instanceof Error ? restError.message : "网络规划失败"
-      throw new Error(`${pluginMessage}；备用网络规划也失败：${restMessage}`)
+    if (result.status === "success") {
+      return result
     }
-  })
+    throw new Error(result.message || "步行路线规划失败")
+  } catch (error) {
+    const analysis = analyzeAmapError(error, "该步行路段规划失败，已自动预估")
+    const fallbackLeg = createEstimatedLeg({
+      fromName,
+      toName,
+      mode: "walking",
+      directDistanceMeters: directDistance,
+      message: analysis.userMessage,
+      multiplier: 1.15,
+    })
+    return {
+      ...fallbackLeg,
+      polylinePaths: [[start, end]],
+    }
+  }
 }
 
-function runWalkingSearch(
-  walking: AMapWalkingInstance,
+async function planTransitLeg(
   start: LngLatTuple,
-  end: LngLatTuple
-) {
-  return new Promise<AMapRouteResult>((resolve, reject) => {
-    walking.search(start, end, (status, result: AMapRouteResult) => {
-      if (status === "complete" && result.routes?.length) {
-        resolve(result)
-        return
-      }
-      const analysis = analyzeAmapError(
-        `${status} ${result?.info || ""} ${result?.message || ""} ${
-          result?.infocode || ""
-        }`,
-        "高德步行路线规划失败"
-      )
-      reject(new Error(analysis.userMessage))
+  end: LngLatTuple,
+  fromName: string,
+  toName: string,
+  cityHint?: string,
+  cityDestinationHint?: string
+): Promise<RouteLegResult> {
+  const directDistance = haversineDistanceMeters(start, end)
+  try {
+    const result = await requestRouteLegByWebService("transit", {
+      origin: start,
+      destination: end,
+      fromName,
+      toName,
+      city: cityHint,
+      cityd: cityDestinationHint,
     })
-  })
-}
-
-function runTransferSearch(
-  transfer: AMapTransferInstance,
-  start: LngLatTuple,
-  end: LngLatTuple
-) {
-  return new Promise<AMapTransferResult>((resolve, reject) => {
-    transfer.search(start, end, (status, result) => {
-      if (status === "complete" && result.plans?.length) {
-        resolve(result)
-        return
-      }
-      const analysis = analyzeAmapError(
-        `${status} ${result?.info || ""} ${result?.message || ""} ${
-          result?.infocode || ""
-        }`,
-        "高德公交路线规划失败"
-      )
-      reject(new Error(analysis.userMessage))
+    if (result.status === "success") {
+      return result
+    }
+    throw new Error(result.message || "当前路段暂无可用公交换乘方案")
+  } catch (error) {
+    const analysis = analyzeAmapError(
+      error,
+      "当前路段暂无可用公交换乘方案，已按预估通勤时间展示"
+    )
+    const fallbackLeg = createEstimatedLeg({
+      fromName,
+      toName,
+      mode: "transit",
+      directDistanceMeters: directDistance,
+      message: analysis.userMessage,
+      multiplier: 1.28,
     })
-  })
+    return {
+      ...fallbackLeg,
+      polylinePaths: [[start, end]],
+    }
+  }
 }
 
 export function MapView({
@@ -604,16 +610,21 @@ export function MapView({
   fromMeTarget,
   fromMeOrigin = null,
   fromMeRequestId,
+  routeSegmentIds: routeSegmentIdsProp,
+  highlightedSpotId = null,
+  highlightedSegmentId = null,
+  onSpotClick,
+  onSegmentClick,
   onSummaryChange,
+  onRouteLegsChange,
 }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<AMapMapInstance | null>(null)
   const amapRef = useRef<AMapNamespace | null>(null)
-  const drivingRef = useRef<AMapDrivingInstance | null>(null)
-  const walkingRef = useRef<AMapWalkingInstance | null>(null)
-  const transferRef = useRef<AMapTransferInstance | null>(null)
   const markerRefs = useRef<unknown[]>([])
   const polylineRefs = useRef<AMapPolylineInstance[]>([])
+  const markerMetaRef = useRef<MarkerMeta[]>([])
+  const segmentMetaRef = useRef<SegmentMeta[]>([])
   const userMarkerRef = useRef<AMapMarkerInstance | null>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const routeTaskIdRef = useRef(0)
@@ -622,6 +633,8 @@ export function MapView({
   const hasCenteredUserRef = useRef(false)
   const spotsCountRef = useRef(spots.length)
   const locationFallbackTriedRef = useRef(false)
+  const onSummaryChangeRef = useRef(onSummaryChange)
+  const onRouteLegsChangeRef = useRef(onRouteLegsChange)
 
   const [mapError, setMapError] = useState<string | null>(null)
   const [isMapLoading, setIsMapLoading] = useState(true)
@@ -634,11 +647,12 @@ export function MapView({
   const [userLocationStatus, setUserLocationStatus] =
     useState<UserLocationStatus>("idle")
   const [userLocationError, setUserLocationError] = useState("")
-  const [userLocationTick, setUserLocationTick] = useState(0)
+  const [userLocationReady, setUserLocationReady] = useState(false)
 
   const isFromMeMode = routeMode === "fromMe"
+  const routeSegmentIds = routeSegmentIdsProp ?? EMPTY_ROUTE_SEGMENT_IDS
   const fromMeLocationSignal = isFromMeMode
-    ? `${userLocationStatus}:${userLocationTick}`
+    ? `${userLocationStatus}:${userLocationReady ? "ready" : "none"}`
     : "trip"
   const isEmpty = isFromMeMode ? !fromMeTarget : spots.length === 0
 
@@ -660,8 +674,16 @@ export function MapView({
   }, [fromMeTarget?.name, isFromMeMode, spots])
 
   useEffect(() => {
-    onSummaryChange?.(summary)
-  }, [onSummaryChange, summary])
+    onSummaryChangeRef.current = onSummaryChange
+  }, [onSummaryChange])
+
+  useEffect(() => {
+    onRouteLegsChangeRef.current = onRouteLegsChange
+  }, [onRouteLegsChange])
+
+  useEffect(() => {
+    onSummaryChangeRef.current?.(summary)
+  }, [summary])
 
   useEffect(() => {
     transportModeRef.current = transportMode
@@ -686,23 +708,18 @@ export function MapView({
     const map = mapRef.current
     if (!map) return
 
-    drivingRef.current?.clear()
-    walkingRef.current?.clear()
-    transferRef.current?.clear()
-    drivingRef.current = null
-    walkingRef.current = null
-    transferRef.current = null
-
     if (markerRefs.current.length > 0) {
       map.remove(markerRefs.current)
       markerRefs.current = []
     }
+    markerMetaRef.current = []
 
     if (polylineRefs.current.length > 0) {
       map.remove(polylineRefs.current)
       polylineRefs.current.forEach((polyline) => polyline.setMap(null))
       polylineRefs.current = []
     }
+    segmentMetaRef.current = []
   }, [])
 
   const clearUserLocation = useCallback(() => {
@@ -719,6 +736,7 @@ export function MapView({
     latestUserLocationRef.current = null
     hasCenteredUserRef.current = false
     locationFallbackTriedRef.current = false
+    setUserLocationReady(false)
   }, [])
 
   const upsertUserLocationMarker = useCallback((lngLat: LngLatTuple) => {
@@ -738,12 +756,12 @@ export function MapView({
       })
       userMarkerRef.current = marker
       map.add(marker)
-      setUserLocationTick((prev) => prev + 1)
+      setUserLocationReady(true)
       return
     }
 
     userMarkerRef.current.setPosition(lngLat)
-    setUserLocationTick((prev) => prev + 1)
+    setUserLocationReady(true)
   }, [])
 
   const centerToUserLocation = useCallback((zoom = 15) => {
@@ -839,7 +857,16 @@ export function MapView({
       setMapError(null)
 
       try {
-        const AMap = await loadAMap()
+        const AMap = await withTimeout(
+          loadAMap([
+            "AMap.ToolBar",
+            "AMap.Scale",
+            "AMap.Geocoder",
+            "AMap.PlaceSearch",
+          ]),
+          AMAP_LOAD_TIMEOUT_MS,
+          "高德地图加载超时，请检查网络或 Key 配置"
+        )
         if (disposed || !mapContainerRef.current) return
 
         amapRef.current = AMap
@@ -854,10 +881,17 @@ export function MapView({
 
         handleMapError = (event?: unknown) => {
           const rawError = getAMapErrorMessage(event)
+          if (!rawError) return
           const analysis = analyzeAmapError(
             rawError,
             "地图瓦片加载异常，请检查 Key 白名单或安全配置"
           )
+          const knownFatal = new Set([
+            "INVALID_USER_SCODE",
+            "USERKEY_PLAT_NOMATCH",
+            "INVALID_USER_KEY",
+          ])
+          if (!analysis.code || !knownFatal.has(analysis.code)) return
           const message = analysis.userMessage
           setMapError(message)
           setSummary((prev) => ({
@@ -869,13 +903,17 @@ export function MapView({
         }
         map.on("error", handleMapError)
 
-        map.addControl(
-          new AMap.ToolBar({
-            locate: false,
-            direction: false,
-          })
-        )
-        map.addControl(new AMap.Scale())
+        if (AMap.ToolBar) {
+          map.addControl(
+            new AMap.ToolBar({
+              locate: false,
+              direction: false,
+            })
+          )
+        }
+        if (AMap.Scale) {
+          map.addControl(new AMap.Scale())
+        }
         requestAnimationFrame(() => map.resize())
         setIsMapReady(true)
 
@@ -1000,7 +1038,10 @@ export function MapView({
   useEffect(() => {
     const map = mapRef.current
     const AMap = amapRef.current
-    if (!map || !AMap || mapError) return
+    if (!map || !AMap || mapError) {
+      setIsRouteLoading(false)
+      return
+    }
 
     const currentTaskId = ++routeTaskIdRef.current
     const nextBaseSummary = createSummary(transportMode, {
@@ -1013,14 +1054,24 @@ export function MapView({
       clearMapOverlays()
       setIsRouteLoading(false)
       updateSummary(nextBaseSummary)
+      onRouteLegsChangeRef.current?.([])
+      let runtimeAMap = AMap
+
+      try {
+        runtimeAMap = await loadAMap(["AMap.Geocoder", "AMap.PlaceSearch"])
+        amapRef.current = runtimeAMap
+      } catch {
+        // 保留底图可用性：扩展插件失败不阻塞地图展示。
+      }
 
       if (isFromMeMode) {
         if (!fromMeTarget) {
+          onRouteLegsChangeRef.current?.([])
           updateSummary(
             createSummary(transportMode, {
               ...baseNames,
               status: "empty",
-              message: "请先选择一个景点作为导航终点",
+                message: "请先选择一个景点作为导航终点",
             })
           )
           if (latestUserLocationRef.current) {
@@ -1037,12 +1088,13 @@ export function MapView({
         let fallbackRouteUrl = ""
 
         try {
-          const { resolved, unresolved } = await resolveSpotCoordinates(AMap, [
+          const { resolved, unresolved } = await resolveSpotCoordinates(runtimeAMap, [
             fromMeTarget,
           ])
           if (routeTaskIdRef.current !== currentTaskId) return
 
           if (resolved.length === 0) {
+            onRouteLegsChangeRef.current?.([])
             updateSummary(
               createSummary(transportMode, {
                 ...baseNames,
@@ -1055,13 +1107,44 @@ export function MapView({
           }
 
           const destination = resolved[0]
-          const destinationMarker = new AMap.Marker({
+          const destinationMarker = new runtimeAMap.Marker({
             position: destination.lngLat,
             title: destination.spot.name,
-            icon: createMarkerIcon(AMap, "终", MARKER_COLORS.end),
-            offset: new AMap.Pixel(-17, -41),
+            content: createMapMarkerHtml({
+              order: 1,
+              type: destination.spot.type,
+              isStart: false,
+              isEnd: true,
+              isSelected:
+                highlightedSpotId !== null
+                  ? highlightedSpotId === destination.spot.id
+                  : true,
+              isKeyStop: destination.spot.type !== "attraction",
+            }),
+            offset: new runtimeAMap.Pixel(-18, -18),
+            zIndex: 160,
           })
+          if (typeof destinationMarker.on === "function") {
+            destinationMarker.on("click", () => onSpotClick?.(destination.spot.id))
+          }
           markerRefs.current = [destinationMarker]
+          markerMetaRef.current = [
+            {
+              spotId: destination.spot.id,
+              marker: destinationMarker,
+              index: 0,
+              total: 1,
+              name: destination.spot.name,
+              type: destination.spot.type,
+              isStart: false,
+              isEnd: true,
+              isKeyStop: destination.spot.type !== "attraction",
+            },
+          ]
+          applyMarkerVisual(
+            markerMetaRef.current[0],
+            highlightedSpotId ?? destination.spot.id
+          )
           map.add([destinationMarker])
 
           const partialErrors = unresolved.map((item) => item.reason)
@@ -1090,6 +1173,7 @@ export function MapView({
           }
 
           if (!startPoint) {
+            onRouteLegsChangeRef.current?.([])
             map.setCenter(destination.lngLat)
             map.setZoom(14)
             map.setFitView(viewOverlays)
@@ -1111,172 +1195,94 @@ export function MapView({
             return
           }
 
-          if (transportMode === "transit") {
-            const cityName = fromMeTarget.city?.trim()
-            if (!cityName || !AMap.Transfer) {
-              map.setFitView(viewOverlays)
-              updateSummary(
-                createSummary(transportMode, {
-                  ...resolvedBase,
-                  status: "transit-degraded",
-                  message: "当前景点缺少城市信息，暂不支持公交路线规划",
-                  fallbackRouteUrl,
-                })
-              )
-              return
-            }
+          const leg =
+            transportMode === "driving"
+              ? await planDrivingLeg(
+                  startPoint,
+                  destination.lngLat,
+                  "我的位置",
+                  destination.spot.name
+                )
+              : transportMode === "walking"
+              ? await planWalkingLeg(
+                  startPoint,
+                  destination.lngLat,
+                  "我的位置",
+                  destination.spot.name
+                )
+              : await planTransitLeg(
+                  startPoint,
+                  destination.lngLat,
+                  "我的位置",
+                  destination.spot.name,
+                  fromMeTarget.city,
+                  destination.spot.city
+                )
 
-            try {
-              const transfer = new AMap.Transfer({
-                map,
-                city: cityName,
-                hideMarkers: true,
-              })
-              transferRef.current = transfer
-              const transferResult = await runTransferSearch(
-                transfer,
-                startPoint,
-                destination.lngLat
-              )
-              if (routeTaskIdRef.current !== currentTaskId) return
-
-              const bestPlan = transferResult.plans?.[0]
-              const distance = Number(bestPlan?.distance ?? 0)
-              const duration = Number(bestPlan?.time ?? 0)
-              map.setFitView(viewOverlays)
-              requestAnimationFrame(() => map.resize())
-              updateSummary(
-                createSummary(transportMode, {
-                  ...resolvedBase,
-                  status: "success",
-                  distance,
-                  duration,
-                  distanceText: formatDistance(distance),
-                  durationText: formatDuration(duration),
-                  message: "公交路线规划完成",
-                  fallbackRouteUrl,
-                })
-              )
-            } catch (error) {
-              const analysis = analyzeAmapError(
-                error,
-                "当前版本暂不支持稳定的公交路线规划，请切换驾车或步行"
-              )
-              map.setFitView(viewOverlays)
-              updateSummary(
-                createSummary(transportMode, {
-                  ...resolvedBase,
-                  status: "transit-degraded",
-                  message: analysis.userMessage,
-                  fallbackRouteUrl,
-                })
-              )
-            }
-            return
-          }
-
-          if (transportMode === "driving") {
-            const driving = new AMap.Driving({
-              map,
-              hideMarkers: true,
-              policy: AMap.DrivingPolicy.LEAST_TIME,
-            })
-            drivingRef.current = driving
-
-            const result = await runDrivingSearch(
-              driving,
-              startPoint,
-              destination.lngLat,
-              []
-            )
-            if (routeTaskIdRef.current !== currentTaskId) return
-
-            const overlays: unknown[] = [...viewOverlays]
-            if (result.source === "rest" && result.path.length >= 2) {
-              const polyline = new AMap.Polyline({
-                path: result.path,
-                strokeColor: "#2D8C59",
-                strokeWeight: 7,
-                lineJoin: "round",
-                showDir: true,
-              })
-              polylineRefs.current = [polyline]
-              map.add([polyline])
-              overlays.push(polyline)
-              map.setFitView(overlays)
-            } else {
-              map.setFitView()
-            }
-            requestAnimationFrame(() => map.resize())
-            updateSummary(
-              createSummary(transportMode, {
-                ...resolvedBase,
-                status: "success",
-                distance: result.distance,
-                duration: result.duration,
-                distanceText: formatDistance(result.distance),
-                durationText: formatDuration(result.duration),
-                message: result.message
-                  ? `驾车路线规划完成。${result.message}`
-                  : "驾车路线规划完成",
-                fallbackRouteUrl,
-              })
-            )
-            return
-          }
-
-          const walking = new AMap.Walking({ hideMarkers: true })
-          walkingRef.current = walking
-          const walkingResult = await runWalkingSearch(
-            walking,
-            startPoint,
-            destination.lngLat
-          )
           if (routeTaskIdRef.current !== currentTaskId) return
 
-          const route = walkingResult.routes?.[0]
-          if (!route) {
-            throw new Error("步行路线规划结果为空")
-          }
-
-          const routeSummary = getRouteSummary(route)
-          const path = toRoutePath(route)
-          const overlays: unknown[] = [...viewOverlays]
-          if (path.length >= 2) {
-            const polyline = new AMap.Polyline({
-              path,
-              strokeColor: "#2D5A47",
-              strokeWeight: 6,
-              lineJoin: "round",
-              showDir: true,
+          const aggregate = aggregateRouteLegs(transportMode, [leg])
+          onRouteLegsChangeRef.current?.([leg])
+          const singleSegmentId = routeSegmentIds[0] || `${destination.spot.id}-from-me`
+          const segmentPolylines = createLegPolylines(
+            runtimeAMap,
+            transportMode,
+            leg,
+            highlightedSegmentId === singleSegmentId
+          )
+          if (segmentPolylines.length > 0) {
+            segmentPolylines.forEach((polyline) => {
+              if (typeof polyline.on === "function") {
+                polyline.on("click", () => onSegmentClick?.(singleSegmentId))
+              }
             })
-            polylineRefs.current = [polyline]
-            map.add([polyline])
-            overlays.push(polyline)
+            map.add(segmentPolylines)
+            polylineRefs.current = segmentPolylines
+            segmentMetaRef.current = [
+              {
+                id: singleSegmentId,
+                mode: transportMode,
+                status: leg.status,
+                fromSpotId: "from-me-origin",
+                toSpotId: destination.spot.id,
+                polylines: segmentPolylines,
+              },
+            ]
+          } else {
+            segmentMetaRef.current = []
           }
 
+          const overlays: unknown[] = [...viewOverlays, ...segmentPolylines]
           map.setFitView(overlays)
           requestAnimationFrame(() => map.resize())
+
+          const legMessages =
+            leg.status === "success" || !leg.message
+              ? []
+              : [`${leg.fromName} → ${leg.toName}：${leg.message}`]
           updateSummary(
             createSummary(transportMode, {
               ...resolvedBase,
-              status: "success",
-              distance: routeSummary.distance,
-              duration: routeSummary.duration,
-              distanceText: formatDistance(routeSummary.distance),
-              durationText: formatDuration(routeSummary.duration),
-              message: "步行路线规划完成",
-              fallbackRouteUrl,
+              status: getSummaryStatusFromAggregate(aggregate),
+              distance: aggregate.totalDistanceMeters,
+              duration: aggregate.totalDurationSeconds,
+              distanceText: formatDistance(aggregate.totalDistanceMeters),
+              durationText: formatDuration(aggregate.totalDurationSeconds),
+              message: getAggregateMessage(transportMode, aggregate),
+              partialErrors: [...partialErrors, ...legMessages],
+              fallbackRouteUrl:
+                aggregate.state === "success" ? "" : fallbackRouteUrl,
             })
           )
           return
         } catch (error) {
+          onRouteLegsChangeRef.current?.([])
           if (routeTaskIdRef.current !== currentTaskId) return
           const analysis = analyzeAmapError(error, "路线规划失败，请稍后重试")
           updateSummary(
             createSummary(transportMode, {
               ...baseNames,
-              status: "route-error",
+              status: "error",
               message: `路线规划失败：${analysis.userMessage}`,
               fallbackRouteUrl: analysis.shouldShowExternalFallback
                 ? fallbackRouteUrl
@@ -1292,6 +1298,7 @@ export function MapView({
       }
 
       if (spots.length === 0) {
+        onRouteLegsChangeRef.current?.([])
         updateSummary(
           createSummary(transportMode, {
             ...baseNames,
@@ -1308,10 +1315,11 @@ export function MapView({
       let fallbackRouteUrl = buildTripFallbackUrl(transportMode, spots)
 
       try {
-        const { resolved, unresolved } = await resolveSpotCoordinates(AMap, spots)
+        const { resolved, unresolved } = await resolveSpotCoordinates(runtimeAMap, spots)
         if (routeTaskIdRef.current !== currentTaskId) return
 
         if (resolved.length === 0) {
+          onRouteLegsChangeRef.current?.([])
           updateSummary(
             createSummary(transportMode, {
               ...baseNames,
@@ -1324,25 +1332,45 @@ export function MapView({
           return
         }
 
+        const markerMeta: MarkerMeta[] = []
         const markers = resolved.map((item, index) => {
           const isStart = index === 0
           const isEnd = index === resolved.length - 1
-          const color = isStart
-            ? MARKER_COLORS.start
-            : isEnd
-            ? MARKER_COLORS.end
-            : MARKER_COLORS.waypoint
-          const label = isStart ? "起" : isEnd ? "终" : String(index)
-
-          return new AMap.Marker({
+          const isKeyStop = item.spot.type === "restaurant" || item.spot.type === "hotel"
+          const marker = new runtimeAMap.Marker({
             position: item.lngLat,
             title: item.spot.name,
-            icon: createMarkerIcon(AMap, label, color),
-            offset: new AMap.Pixel(-17, -41),
+            content: createMapMarkerHtml({
+              order: index + 1,
+              type: item.spot.type,
+              isStart,
+              isEnd,
+              isSelected: highlightedSpotId === item.spot.id,
+              isKeyStop,
+            }),
+            offset: new runtimeAMap.Pixel(-18, -18),
+            zIndex: highlightedSpotId === item.spot.id ? 180 : isStart || isEnd ? 150 : 120,
           })
+          if (typeof marker.on === "function") {
+            marker.on("click", () => onSpotClick?.(item.spot.id))
+          }
+          markerMeta.push({
+            spotId: item.spot.id,
+            marker,
+            index,
+            total: resolved.length,
+            name: item.spot.name,
+            type: item.spot.type,
+            isStart,
+            isEnd,
+            isKeyStop,
+          })
+          return marker
         })
 
         markerRefs.current = markers
+        markerMetaRef.current = markerMeta
+        markerMeta.forEach((meta) => applyMarkerVisual(meta, highlightedSpotId))
         map.add(markers)
 
         const partialErrors = unresolved.map((item) => item.reason)
@@ -1356,6 +1384,7 @@ export function MapView({
         }
 
         if (resolved.length === 1) {
+          onRouteLegsChangeRef.current?.([])
           map.setCenter(resolved[0].lngLat)
           map.setZoom(14)
           map.setFitView(markers)
@@ -1378,197 +1407,109 @@ export function MapView({
           originName: resolved[0]?.spot.name || "起点",
         })
 
-        if (transportMode === "transit") {
-          const cityName =
-            resolved[0]?.spot.city?.trim() ||
-            resolved[resolved.length - 1]?.spot.city?.trim()
-          if (!cityName || !AMap.Transfer) {
-            map.setFitView(markers)
-            updateSummary(
-              createSummary(transportMode, {
-                ...resolvedBase,
-                status: "transit-degraded",
-                message: "当前景点缺少城市信息，暂不支持公交路线规划",
-                fallbackRouteUrl,
-              })
-            )
-            return
+        const legs: RouteLegResult[] = []
+        const legIssues: string[] = []
+        const legPolylines: AMapPolylineInstance[] = []
+        const segmentMetas: SegmentMeta[] = []
+        for (let index = 0; index < resolved.length - 1; index += 1) {
+          const current = resolved[index]
+          const next = resolved[index + 1]
+
+          const leg =
+            transportMode === "driving"
+              ? await planDrivingLeg(
+                  current.lngLat,
+                  next.lngLat,
+                  current.spot.name,
+                  next.spot.name
+                )
+              : transportMode === "walking"
+              ? await planWalkingLeg(
+                  current.lngLat,
+                  next.lngLat,
+                  current.spot.name,
+                  next.spot.name
+                )
+              : await planTransitLeg(
+                  current.lngLat,
+                  next.lngLat,
+                  current.spot.name,
+                  next.spot.name,
+                  current.spot.city || resolved[0]?.spot.city,
+                  next.spot.city || current.spot.city || resolved[0]?.spot.city
+                )
+
+          if (routeTaskIdRef.current !== currentTaskId) return
+
+          legs.push(leg)
+          if (leg.status !== "success" && leg.message) {
+            legIssues.push(`${leg.fromName} → ${leg.toName}：${leg.message}`)
           }
-
-          try {
-            const transfer = new AMap.Transfer({
-              map,
-              city: cityName,
-              hideMarkers: true,
-            })
-            transferRef.current = transfer
-            const transferResult = await runTransferSearch(
-              transfer,
-              coordinates[0],
-              coordinates[coordinates.length - 1]
-            )
-            if (routeTaskIdRef.current !== currentTaskId) return
-
-            const bestPlan = transferResult.plans?.[0]
-            const distance = Number(bestPlan?.distance ?? 0)
-            const duration = Number(bestPlan?.time ?? 0)
-            map.setFitView()
-            requestAnimationFrame(() => map.resize())
-            updateSummary(
-              createSummary(transportMode, {
-                ...resolvedBase,
-                status: partialErrors.length > 0 ? "partial-error" : "success",
-                distance,
-                duration,
-                distanceText: formatDistance(distance),
-                durationText: formatDuration(duration),
-                message:
-                  coordinates.length > 2
-                    ? "公交路线已按起点和终点规划，途经点暂未纳入公交方案"
-                    : "公交路线规划完成",
-                fallbackRouteUrl,
-              })
-            )
-          } catch (error) {
-            const analysis = analyzeAmapError(
-              error,
-              "当前版本暂不支持稳定的公交路线规划，请切换驾车或步行"
-            )
-            map.setFitView(markers)
-            updateSummary(
-              createSummary(transportMode, {
-                ...resolvedBase,
-                status: "transit-degraded",
-                message: analysis.userMessage,
-                fallbackRouteUrl,
-              })
-            )
-          }
-          return
-        }
-
-        if (transportMode === "driving") {
-          const driving = new AMap.Driving({
-            map,
-            hideMarkers: true,
-            policy: AMap.DrivingPolicy.LEAST_TIME,
+          const segmentId =
+            routeSegmentIds[index] || `d-${current.spot.id}-${next.spot.id}`
+          const segmentPolylines = createLegPolylines(
+            runtimeAMap,
+            transportMode,
+            leg,
+            highlightedSegmentId === segmentId
+          )
+          segmentPolylines.forEach((polyline) => {
+            if (typeof polyline.on === "function") {
+              polyline.on("click", () => onSegmentClick?.(segmentId))
+            }
           })
-          drivingRef.current = driving
-
-          const drivingResult = await runDrivingSearch(
-            driving,
-            coordinates[0],
-            coordinates[coordinates.length - 1],
-            coordinates.slice(1, -1)
-          )
-          if (routeTaskIdRef.current !== currentTaskId) return
-
-          if (drivingResult.source === "rest" && drivingResult.path.length >= 2) {
-            const polyline = new AMap.Polyline({
-              path: drivingResult.path,
-              strokeColor: "#2D8C59",
-              strokeWeight: 7,
-              lineJoin: "round",
-              showDir: true,
-            })
-            polylineRefs.current = [polyline]
-            map.add([polyline])
-            map.setFitView([...markers, polyline])
-          } else {
-            map.setFitView()
-          }
-          requestAnimationFrame(() => map.resize())
-
-          updateSummary(
-            createSummary(transportMode, {
-              ...resolvedBase,
-              status: partialErrors.length > 0 ? "partial-error" : "success",
-              distance: drivingResult.distance,
-              duration: drivingResult.duration,
-              distanceText: formatDistance(drivingResult.distance),
-              durationText: formatDuration(drivingResult.duration),
-              message:
-                partialErrors.length > 0
-                  ? `驾车路线规划完成，部分景点因坐标缺失已跳过${
-                      drivingResult.message ? `。${drivingResult.message}` : ""
-                    }`
-                  : drivingResult.message
-                  ? `驾车路线规划完成。${drivingResult.message}`
-                  : "驾车路线规划完成",
-              fallbackRouteUrl,
-            })
-          )
-          return
+          segmentMetas.push({
+            id: segmentId,
+            mode: transportMode,
+            status: leg.status,
+            fromSpotId: current.spot.id,
+            toSpotId: next.spot.id,
+            polylines: segmentPolylines,
+          })
+          legPolylines.push(...segmentPolylines)
         }
 
-        const walking = new AMap.Walking({ hideMarkers: true })
-        walkingRef.current = walking
-
-        let totalDistance = 0
-        let totalDuration = 0
-        const polylines: AMapPolylineInstance[] = []
-
-        for (let i = 0; i < coordinates.length - 1; i += 1) {
-          const walkingResult = await runWalkingSearch(
-            walking,
-            coordinates[i],
-            coordinates[i + 1]
-          )
-          if (routeTaskIdRef.current !== currentTaskId) return
-
-          const route = walkingResult.routes?.[0]
-          if (!route) {
-            throw new Error("步行路线规划结果为空")
-          }
-
-          const routeSummary = getRouteSummary(route)
-          totalDistance += routeSummary.distance
-          totalDuration += routeSummary.duration
-
-          const path = toRoutePath(route)
-          if (path.length >= 2) {
-            const polyline = new AMap.Polyline({
-              path,
-              strokeColor: "#2D5A47",
-              strokeWeight: 6,
-              lineJoin: "round",
-              showDir: true,
-            })
-            polylines.push(polyline)
-          }
-        }
-
-        if (polylines.length > 0) {
-          map.add(polylines)
-          polylineRefs.current = polylines
-          map.setFitView([...markers, ...polylines])
+        const aggregate = aggregateRouteLegs(transportMode, legs)
+        onRouteLegsChangeRef.current?.(legs)
+        if (legPolylines.length > 0) {
+          map.add(legPolylines)
+          polylineRefs.current = legPolylines
+          segmentMetaRef.current = segmentMetas
+          map.setFitView([...markers, ...legPolylines])
         } else {
+          segmentMetaRef.current = []
           map.setFitView(markers)
         }
         requestAnimationFrame(() => map.resize())
 
+        const totalPartialErrors = [...partialErrors, ...legIssues]
+        let summaryStatus = getSummaryStatusFromAggregate(aggregate)
+        if (summaryStatus === "success" && totalPartialErrors.length > 0) {
+          summaryStatus = "partial-success"
+        }
+
         updateSummary(
           createSummary(transportMode, {
             ...resolvedBase,
-            status: partialErrors.length > 0 ? "partial-error" : "success",
-            distance: totalDistance,
-            duration: totalDuration,
-            distanceText: formatDistance(totalDistance),
-            durationText: formatDuration(totalDuration),
-            message:
-              partialErrors.length > 0
-                ? "步行路线规划完成，部分景点因坐标缺失已跳过"
-                : "步行路线规划完成",
-            fallbackRouteUrl,
+            status: summaryStatus,
+            distance: aggregate.totalDistanceMeters,
+            duration: aggregate.totalDurationSeconds,
+            distanceText: formatDistance(aggregate.totalDistanceMeters),
+            durationText: formatDuration(aggregate.totalDurationSeconds),
+            message: getAggregateMessage(transportMode, aggregate),
+            partialErrors: totalPartialErrors,
+            fallbackRouteUrl:
+              aggregate.state === "success" ? "" : fallbackRouteUrl,
           })
         )
       } catch (error) {
+        onRouteLegsChangeRef.current?.([])
         if (routeTaskIdRef.current !== currentTaskId) return
         const analysis = analyzeAmapError(error, "路线规划失败，请稍后重试")
         updateSummary(
           createSummary(transportMode, {
             ...baseNames,
-            status: "route-error",
+            status: "error",
             message: `路线规划失败：${analysis.userMessage}`,
             fallbackRouteUrl: analysis.shouldShowExternalFallback
               ? fallbackRouteUrl
@@ -1592,11 +1533,97 @@ export function MapView({
     fromMeLocationSignal,
     isFromMeMode,
     mapError,
+    routeSegmentIds,
     spots,
     transportMode,
     upsertUserLocationMarker,
     updateSummary,
   ])
+
+  useEffect(() => {
+    if (!mapError) return
+    setIsMapLoading(false)
+    setIsRouteLoading(false)
+  }, [mapError])
+
+  useEffect(() => {
+    if (!isMapLoading && !isRouteLoading) return
+
+    const timeoutId = window.setTimeout(() => {
+      if (mapError) return
+
+      setIsMapLoading(false)
+      setIsRouteLoading(false)
+
+      if (!mapRef.current) {
+        setMapError("地图加载超时，请检查网络与高德配置后重试")
+        setSummary((prev) => ({
+          ...prev,
+          mode: transportModeRef.current,
+          status: "map-error",
+          message: "地图加载超时，请检查网络与高德配置后重试",
+        }))
+        return
+      }
+
+      setSummary((prev) => {
+        if (prev.status !== "loading") return prev
+        return {
+          ...prev,
+          mode: transportModeRef.current,
+          status: "route-error",
+          message: "路线规划超时，请稍后重试或切换出行方式",
+        }
+      })
+    }, 15000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isMapLoading, isRouteLoading, mapError])
+
+  useEffect(() => {
+    if (markerMetaRef.current.length === 0) return
+    for (const meta of markerMetaRef.current) {
+      applyMarkerVisual(meta, highlightedSpotId)
+    }
+
+    if (!highlightedSpotId) return
+    const target = markerMetaRef.current.find((item) => item.spotId === highlightedSpotId)
+    const map = mapRef.current
+    if (!target || !map) return
+
+    const position = ensureLngLat(target.marker.getPosition?.())
+    if (position) {
+      map.setCenter(position)
+    }
+  }, [highlightedSpotId])
+
+  useEffect(() => {
+    if (segmentMetaRef.current.length === 0) return
+    const map = mapRef.current
+    let focusOverlays: unknown[] = []
+
+    for (const segment of segmentMetaRef.current) {
+      const isHighlighted = Boolean(
+        highlightedSegmentId && segment.id === highlightedSegmentId
+      )
+      const style = getRouteStrokeStyle(segment.mode, segment.status, isHighlighted)
+      segment.polylines.forEach((polyline) => {
+        polyline.setOptions?.(style)
+      })
+      if (isHighlighted) {
+        focusOverlays = [...focusOverlays, ...segment.polylines]
+      }
+    }
+
+    if (focusOverlays.length > 0 && map) {
+      const selected = segmentMetaRef.current.find((item) => item.id === highlightedSegmentId)
+      const startMarker = markerMetaRef.current.find((item) => item.spotId === selected?.fromSpotId)?.marker
+      const endMarker = markerMetaRef.current.find((item) => item.spotId === selected?.toSpotId)?.marker
+      if (startMarker) focusOverlays.push(startMarker)
+      if (endMarker) focusOverlays.push(endMarker)
+      map.setFitView(focusOverlays)
+    }
+  }, [highlightedSegmentId])
 
   return (
     <div className="relative w-full h-[360px] rounded-2xl overflow-hidden bg-secondary">
@@ -1604,7 +1631,7 @@ export function MapView({
 
       {!isMapLoading && !mapError && (
         <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between gap-2 pointer-events-none">
-          <div className="max-w-[70%] px-2.5 py-1.5 rounded-full bg-white/95 text-[11px] text-muted-foreground shadow-sm border border-border/40 truncate">
+          <div className="max-w-[70%] truncate rounded-full border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-2.5 py-1.5 text-[11px] text-[var(--app-text-secondary)] shadow-sm">
             {getUserLocationStatusText(userLocationStatus, userLocationError)}
           </div>
           <button
@@ -1656,7 +1683,7 @@ export function MapView({
               })()
             }}
             disabled={isMapLoading}
-            className="pointer-events-auto h-8 w-8 rounded-full bg-white/95 border border-border/40 shadow-sm flex items-center justify-center text-foreground disabled:opacity-40"
+            className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--app-surface-elevated)] text-[var(--app-text-primary)] shadow-sm disabled:opacity-40"
             title="定位到当前位置"
           >
             <LocateFixed className="w-4 h-4" />
@@ -1665,8 +1692,8 @@ export function MapView({
       )}
 
       {(isMapLoading || isRouteLoading) && (
-        <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] flex items-center justify-center">
-          <div className="inline-flex items-center gap-2 text-sm text-muted-foreground bg-white/80 rounded-full px-3 py-2">
+        <div className="absolute inset-0 flex items-center justify-center bg-[color:rgba(243,241,235,0.72)] backdrop-blur-[1px]">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-2 text-sm text-[var(--app-text-secondary)]">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{isMapLoading ? "地图加载中..." : "路线规划中..."}</span>
           </div>
@@ -1683,11 +1710,12 @@ export function MapView({
       )}
 
       {!isMapLoading && mapError && (
-        <div className="absolute inset-0 bg-red-50/95 flex items-center justify-center px-5">
-          <div className="text-center text-red-600 text-sm leading-6">
+        <div className="absolute inset-0 flex items-center justify-center bg-[color:rgba(245,233,231,0.95)] px-5">
+          <div className="text-center text-sm leading-6 text-[var(--app-error)]">
             <AlertTriangle className="w-8 h-8 mx-auto mb-2" />
             <p>地图加载失败</p>
-            <p className="text-xs text-red-500 mt-1">{mapError}</p>
+            <p className="mt-1 text-xs opacity-90">当前无法加载地图，请检查高德配置或稍后重试。</p>
+            {mapError && <p className="mt-1 text-xs opacity-90">详细原因：{mapError}</p>}
           </div>
         </div>
       )}

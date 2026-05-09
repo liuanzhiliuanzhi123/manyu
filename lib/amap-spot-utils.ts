@@ -26,6 +26,7 @@ export interface ResolveSpotCoordinatesResult {
 }
 
 const coordinateCache = new Map<string, LngLatTuple | null>()
+const AMap_SERVICE_TIMEOUT_MS = 4500
 
 function parseNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value
@@ -324,9 +325,19 @@ function geocodeAddress(
 ): Promise<LngLatTuple | null> {
   const geocoder = new AMap.Geocoder({ city })
   return new Promise((resolve) => {
+    let settled = false
+    const timeoutId = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, AMap_SERVICE_TIMEOUT_MS)
+
     geocoder.getLocation(
       address,
       (status: AMapServiceStatus, result: AMapGeocodeResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeoutId)
         if (status !== "complete" || !result.geocodes?.length) {
           resolve(null)
           return
@@ -350,9 +361,19 @@ function placeSearchAddress(
   })
 
   return new Promise((resolve) => {
+    let settled = false
+    const timeoutId = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, AMap_SERVICE_TIMEOUT_MS)
+
     placeSearch.search(
       keyword,
       (status: AMapServiceStatus, result: AMapPlaceSearchResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeoutId)
         if (status !== "complete") {
           resolve(null)
           return

@@ -4,34 +4,41 @@ export interface AMapErrorAnalysis {
   shouldShowExternalFallback: boolean
 }
 
+const CODE_PATTERN =
+  /(USERKEY_PLAT_NOMATCH|INVALID_USER_SCODE|INVALID_USER_KEY|SERVICE_NOT_AVAILABLE|DAILY_QUERY_OVER_LIMIT|USER_DAILY_QUERY_OVER_LIMIT|OVER_LIMIT|NO_ROADS_NEARBY|CITY_NOT_SUPPORT|TOO_FREQUENT|NO_DATA)/i
+
 function normalizeText(input: string) {
   return input.trim().toUpperCase()
 }
 
 function pickCode(text: string) {
-  const matched = text.match(
-    /(USERKEY_PLAT_NOMATCH|INVALID_USER_SCODE|INVALID_USER_KEY|SERVICE_NOT_AVAILABLE|DAILY_QUERY_OVER_LIMIT|USER_DAILY_QUERY_OVER_LIMIT|OVER_LIMIT|NO_ROADS_NEARBY|CITY_NOT_SUPPORT|TOO_FREQUENT|NO_DATA)/i
-  )
+  const matched = text.match(CODE_PATTERN)
   return matched?.[1]?.toUpperCase() ?? null
+}
+
+function toMessage(errorLike: unknown) {
+  if (typeof errorLike === "string") return errorLike
+  if (errorLike instanceof Error) return errorLike.message
+  if (typeof errorLike === "object" && errorLike) {
+    const payload = errorLike as Record<string, unknown>
+    const candidates = [payload.message, payload.info, payload.error, payload.infocode]
+    return candidates
+      .filter((item) => typeof item === "string")
+      .map((item) => String(item))
+      .join(" ")
+  }
+  return String(errorLike ?? "")
 }
 
 export function analyzeAmapError(
   errorLike: unknown,
   fallbackMessage = "路线规划失败，请稍后重试"
 ): AMapErrorAnalysis {
-  const raw =
-    typeof errorLike === "string"
-      ? errorLike
-      : errorLike instanceof Error
-      ? errorLike.message
-      : String(errorLike ?? "")
+  const raw = toMessage(errorLike)
   const text = normalizeText(raw)
   const code = pickCode(text)
 
-  if (
-    text.includes("INVALID_USER_SCODE") &&
-    text.includes("USERKEY_PLAT_NOMATCH")
-  ) {
+  if (text.includes("INVALID_USER_SCODE") && text.includes("USERKEY_PLAT_NOMATCH")) {
     return {
       code: "INVALID_USER_SCODE",
       userMessage:
@@ -44,7 +51,7 @@ export function analyzeAmapError(
     return {
       code: "USERKEY_PLAT_NOMATCH",
       userMessage:
-        "高德 Key 与当前访问域名不匹配（USERKEY_PLAT_NOMATCH）。请在高德控制台把当前域名加入 Web 白名单，例如 localhost 或 127.0.0.1。",
+        "高德 Key 与当前访问域名不匹配（USERKEY_PLAT_NOMATCH）。请在高德控制台将当前域名（如 localhost 或 127.0.0.1）加入 Web 白名单。",
       shouldShowExternalFallback: true,
     }
   }
@@ -53,7 +60,7 @@ export function analyzeAmapError(
     return {
       code: "INVALID_USER_SCODE",
       userMessage:
-        "高德安全密钥配置错误（INVALID_USER_SCODE）。请检查 NEXT_PUBLIC_AMAP_SECURITY_JS_CODE；若未启用安全密钥，请删除该变量并重启项目。",
+        "高德安全密钥配置错误（INVALID_USER_SCODE）。请检查 NEXT_PUBLIC_AMAP_SECURITY_JS_CODE；若暂未启用安全密钥，请删除该变量并重启项目。",
       shouldShowExternalFallback: true,
     }
   }
@@ -61,7 +68,8 @@ export function analyzeAmapError(
   if (text.includes("INVALID_USER_KEY")) {
     return {
       code: "INVALID_USER_KEY",
-      userMessage: "高德 Key 无效，请检查 NEXT_PUBLIC_AMAP_KEY 是否正确且已开通 JS API。",
+      userMessage:
+        "高德 Key 无效，请检查 NEXT_PUBLIC_AMAP_JS_KEY（或兼容字段 NEXT_PUBLIC_AMAP_KEY）是否正确并已开通 JS API。",
       shouldShowExternalFallback: false,
     }
   }
@@ -73,7 +81,7 @@ export function analyzeAmapError(
   ) {
     return {
       code: "OVER_LIMIT",
-      userMessage: "高德路线请求已超出配额，请稍后重试或更换可用 Key。",
+      userMessage: "高德接口调用已超出配额，请稍后重试或更换可用 Key。",
       shouldShowExternalFallback: true,
     }
   }
@@ -90,7 +98,7 @@ export function analyzeAmapError(
   if (text.includes("NO_ROADS_NEARBY") || text.includes("NO_DATA")) {
     return {
       code: code ?? "NO_DATA",
-      userMessage: "起点或终点附近没有可规划道路，请切换步行或更换地点后再试。",
+      userMessage: "起点或终点附近没有可规划道路，请尝试切换地点或出行方式。",
       shouldShowExternalFallback: false,
     }
   }
@@ -106,7 +114,7 @@ export function analyzeAmapError(
   if (text.includes("TOO_FREQUENT")) {
     return {
       code: "TOO_FREQUENT",
-      userMessage: "路线请求过于频繁，请稍后重试。",
+      userMessage: "请求过于频繁，请稍后重试。",
       shouldShowExternalFallback: true,
     }
   }
@@ -117,3 +125,4 @@ export function analyzeAmapError(
     shouldShowExternalFallback: false,
   }
 }
+

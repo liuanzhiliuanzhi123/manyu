@@ -1,0 +1,63 @@
+﻿export const travelDesignTokens = {
+  colors: {
+    appBg: "#A7B86B",
+    surface: "#F7F6F0",
+    card: "#FBFAF5",
+    cardAlt: "#F2F3EA",
+    textPrimary: "#1F241D",
+    textSecondary: "#66705F",
+    brand: "#5F7332",
+    brandDeep: "#33451F",
+    brandSoft: "#DDE5C9",
+    border: "#E3E7DB",
+    shadow: "rgba(41, 52, 27, 0.08)",
+    success: "#6D8750",
+    warning: "#B48B4E",
+    error: "#B85A4D",
+  },
+  radius: {
+    xl: "32px",
+    lg: "24px",
+    md: "20px",
+    sm: "18px",
+    xs: "14px",
+    pill: "9999px",
+  },
+  spacing: {
+    1: "4px",
+    2: "8px",
+    3: "12px",
+    4: "16px",
+    5: "20px",
+    6: "24px",
+    8: "32px",
+    10: "40px",
+  },
+  shadow: {
+    soft: "0 6px 18px rgba(41,52,27,0.06)",
+    card: "0 10px 26px rgba(41,52,27,0.08)",
+    lifted: "0 18px 42px rgba(41,52,27,0.12)",
+  },
+  typography: {
+    hero: "clamp(1.86rem, 5.8vw, 2.34rem)",
+    pageTitle: "1.34rem",
+    sectionTitle: "1.06rem",
+    cardTitle: "0.98rem",
+    body: "0.92rem",
+    helper: "0.78rem",
+    label: "0.72rem",
+    button: "0.9rem",
+    numeric: "0.88rem",
+  },
+  motion: {
+    quick: "140ms",
+    base: "180ms",
+    smooth: "240ms",
+    ease: "cubic-bezier(0.22, 1, 0.36, 1)",
+  },
+  icon: {
+    stroke: 1.75,
+  },
+} as const
+
+export type TravelDesignTokens = typeof travelDesignTokens

@@ -1,117 +1,291 @@
-"use client"
+﻿"use client"
 
-import { Clock3, MapPin, Wallet } from "lucide-react"
-import { formatDistance, formatDuration } from "@/lib/amap-spot-utils"
-import type { ItineraryDay } from "@/lib/travel-context"
+import {
+  ArrowDown,
+  ArrowUp,
+  Clock3,
+  Lock,
+  LockOpen,
+  RefreshCcw,
+  Tag,
+  Timer,
+  Wallet,
+} from "lucide-react"
 import { RouteLegCard } from "@/components/travel/route-leg-card"
+import { ResultLifestyleCard } from "@/components/travel/result-lifestyle-card"
+import { AppButton } from "@/components/ui/app-button"
+import { AppTag } from "@/components/ui/app-tag"
+import { resolvePlaceImage } from "@/lib/place-image"
+import { getDayHeadline, getDayLabel } from "@/lib/result-layout"
+import type { ItineraryDay, RouteTransportMode } from "@/lib/travel-context"
 
 interface DailyRouteCardProps {
   day: ItineraryDay
+  showDayHeader?: boolean
+  highlightedSpotId?: string | null
+  highlightedLegId?: string | null
+  onSpotClick?: (spotId: string) => void
+  onLegClick?: (legId: string) => void
+  domIdPrefix?: string
+  routeLegsOverride?: ItineraryDay["routeLegs"]
+  displayMode?: RouteTransportMode
+  editable?: boolean
+  lockedSpotIds?: string[]
+  onMoveSpot?: (spotId: string, direction: "up" | "down") => void
+  onReplaceSpot?: (spotId: string) => void
+  onToggleSpotLock?: (spotId: string) => void
+  onReplaceMeal?: (mealType: "lunch" | "dinner") => void
+  onReplaceHotel?: () => void
+  onOptimizeDay?: () => void
 }
 
-function getLegByPosition(day: ItineraryDay, spotIndex: number) {
-  if (spotIndex < day.spots.length - 1) {
-    return day.routeLegs[day.startsFromDeparture ? spotIndex + 1 : spotIndex] || null
-  }
-  if (spotIndex === day.spots.length - 1 && day.returnsToDeparture) {
-    return day.routeLegs[day.routeLegs.length - 1] || null
-  }
-  return null
-}
-
-export function DailyRouteCard({ day }: DailyRouteCardProps) {
-  const startLeg = day.startsFromDeparture ? day.routeLegs[0] : null
+export function DailyRouteCard({
+  day,
+  showDayHeader = true,
+  highlightedSpotId,
+  highlightedLegId,
+  onSpotClick,
+  onLegClick,
+  domIdPrefix = "result",
+  routeLegsOverride,
+  displayMode,
+  editable = false,
+  lockedSpotIds = [],
+  onMoveSpot,
+  onReplaceSpot,
+  onToggleSpotLock,
+  onReplaceMeal,
+  onReplaceHotel,
+  onOptimizeDay,
+}: DailyRouteCardProps) {
+  const routeLegs = routeLegsOverride ?? day.routeLegs
+  const lockedSet = new Set(lockedSpotIds)
 
   return (
-    <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-      <header className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{day.title}</h3>
-          <p className="text-xs text-muted-foreground mt-1">{day.theme || "精选路线"}</p>
-        </div>
-        <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-          {day.startTime} - {day.endTime}
-        </span>
-      </header>
-
-      <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
-        <div className="rounded-xl bg-secondary/60 px-3 py-2">
-          <p className="text-muted-foreground">总路程</p>
-          <p className="font-semibold text-foreground mt-1">
-            {formatDistance(day.totalDistanceMeters)}
+    <section className="space-y-4">
+      {showDayHeader && (
+        <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+          <p className="text-xs font-medium text-[var(--app-brand)]">{getDayLabel(day.day)}</p>
+          <h3 className="mt-1 text-base font-semibold text-[var(--app-text-strong)]">{getDayHeadline(day)}</h3>
+          <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
+            {day.startTime} - {day.endTime}
           </p>
-        </div>
-        <div className="rounded-xl bg-secondary/60 px-3 py-2">
-          <p className="text-muted-foreground">总交通时长</p>
-          <p className="font-semibold text-foreground mt-1">
-            {formatDuration(day.totalTravelSeconds)}
-          </p>
-        </div>
-      </div>
+        </section>
+      )}
 
-      <div className="space-y-3">
-        {startLeg && <RouteLegCard leg={startLeg} />}
+      {editable && (
+        <section className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-[var(--app-text-secondary)]">编辑模式已开启，你可以微调当日节点。</p>
+            <AppButton type="button" size="sm" variant="secondary" onClick={onOptimizeDay}>
+              <RefreshCcw className="h-3.5 w-3.5" />
+              重新优化当日
+            </AppButton>
+          </div>
+        </section>
+      )}
 
-        {day.spots.map((spot, index) => {
-          const followingLeg = getLegByPosition(day, index)
-          return (
-            <div key={spot.id} className="space-y-2">
-              <article className="rounded-xl border border-border/50 bg-secondary/20 p-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center">
+      <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">景点时间线</h4>
+            <p className="mt-1 text-xs text-[var(--app-text-secondary)]">按游玩顺序阅读，像翻阅当天行程手册。</p>
+          </div>
+          <AppTag tone="info">主内容</AppTag>
+        </div>
+
+        <div className="space-y-3">
+          {day.spots.map((spot, index) => {
+            const isSpotActive = highlightedSpotId === spot.id
+            const isLocked = lockedSet.has(spot.id)
+            return (
+              <article
+                key={spot.id}
+                id={`${domIdPrefix}-spot-${spot.id}`}
+                role={onSpotClick ? "button" : undefined}
+                tabIndex={onSpotClick ? 0 : undefined}
+                onClick={() => onSpotClick?.(spot.id)}
+                onKeyDown={(event) => {
+                  if (!onSpotClick) return
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    onSpotClick(spot.id)
+                  }
+                }}
+                className={`rounded-[var(--app-radius-md)] border p-3 transition ${
+                  isSpotActive
+                    ? "border-[var(--app-brand)] bg-[var(--app-brand-soft)]/55 ring-2 ring-[var(--app-brand)]/15"
+                    : "border-[var(--app-line)] bg-[var(--app-surface)]"
+                } ${onSpotClick ? "cursor-pointer" : ""}`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="numeric mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-xs font-semibold text-[var(--app-brand)]">
                     {index + 1}
                   </div>
                   <img
-                    src={spot.image}
+                    src={resolvePlaceImage({
+                      id: spot.id,
+                      name: spot.name,
+                      city: spot.city,
+                      province: spot.province,
+                      image: spot.image,
+                      coverImage: spot.image,
+                    })}
                     alt={spot.name}
-                    className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                    className="h-14 w-14 rounded-[0.8rem] object-cover"
+                    onError={(event) => {
+                      event.currentTarget.src = resolvePlaceImage({ city: spot.city, province: spot.province, name: spot.name })
+                    }}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate">{spot.name}</p>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {spot.address}
-                    </p>
+                    <p className="truncate text-sm font-semibold text-[var(--app-text-strong)]">{spot.name}</p>
+                    <p className="mt-0.5 line-clamp-1 text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+                    <div className="numeric mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--app-text-secondary)]">
+                      <span className="inline-flex items-center gap-1 rounded-[0.65rem] bg-[var(--app-surface-elevated)] px-2 py-1">
+                        <Clock3 className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                        {spot.arrivalTime || "--:--"} - {spot.leaveTime || "--:--"}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-[0.65rem] bg-[var(--app-surface-elevated)] px-2 py-1">
+                        <Timer className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                        停留 {spot.suggestedDurationText || "--"}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      {(spot.tags || []).slice(0, 3).map((tag) => (
+                        <span key={`${spot.id}-${tag}`} className="rounded-full bg-[var(--app-surface-elevated)] px-2 py-0.5 text-[var(--app-text-secondary)]">
+                          {tag}
+                        </span>
+                      ))}
+                      <span className="numeric inline-flex items-center gap-1 rounded-full bg-[var(--app-surface-elevated)] px-2 py-0.5 text-[var(--app-text-secondary)]">
+                        <Wallet className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                        {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
+                      </span>
+                    </div>
+                    {spot.plannerReason && (
+                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] leading-5 text-[var(--app-text-secondary)]">
+                        <Tag className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                        {spot.plannerReason}
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-card px-2.5 py-2 text-muted-foreground">
-                    <p>到达 {spot.arrivalTime || "--:--"}</p>
-                    <p className="mt-1">离开 {spot.leaveTime || "--:--"}</p>
+
+                {editable && (
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <AppButton
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onMoveSpot?.(spot.id, "up")
+                      }}
+                      disabled={index === 0 || isLocked}
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                      上移
+                    </AppButton>
+                    <AppButton
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onMoveSpot?.(spot.id, "down")
+                      }}
+                      disabled={index === day.spots.length - 1 || isLocked}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                      下移
+                    </AppButton>
+                    <AppButton
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onReplaceSpot?.(spot.id)
+                      }}
+                      disabled={isLocked}
+                    >
+                      替换景点
+                    </AppButton>
+                    <AppButton
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onToggleSpotLock?.(spot.id)
+                      }}
+                    >
+                      {isLocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+                      {isLocked ? "已锁定" : "锁定"}
+                    </AppButton>
                   </div>
-                  <div className="rounded-lg bg-card px-2.5 py-2 text-muted-foreground">
-                    <p>建议停留</p>
-                    <p className="mt-1 text-foreground font-medium">
-                      {spot.suggestedDurationText || "--"}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center justify-between text-xs">
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <Clock3 className="w-3.5 h-3.5 text-primary" />
-                    {spot.openTime || "营业时间以现场为准"}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-primary font-medium">
-                    <Wallet className="w-3.5 h-3.5" />
-                    {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
-                  </span>
-                </div>
+                )}
               </article>
-
-              {followingLeg && <RouteLegCard leg={followingLeg} />}
-            </div>
-          )
-        })}
-      </div>
-
-      <footer className="mt-4 rounded-xl bg-secondary/40 p-3 text-xs">
-        <div className="flex items-center gap-1.5 text-muted-foreground">
-          <MapPin className="w-3.5 h-3.5 text-primary" />
-          当日景点 {day.spots.length} 个
+            )
+          })}
         </div>
-        <div className="mt-1 text-muted-foreground">
-          游玩时长 {Math.round(day.totalPlayMinutes)} 分钟 · 预计花费 ¥{day.totalEstimatedCost}
+      </section>
+
+      <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">路线段（辅助）</h4>
+          <AppTag>服务于景点顺序</AppTag>
         </div>
-      </footer>
+        {routeLegs.length === 0 ? (
+          <p className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-xs text-[var(--app-text-secondary)]">
+            当前路线段暂未生成，可切换出行方式或重新优化。
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {routeLegs.map((leg) => (
+              <RouteLegCard
+                key={leg.id}
+                leg={leg}
+                displayMode={displayMode}
+                active={highlightedLegId === leg.id}
+                onClick={onLegClick}
+                tone="subtle"
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+        <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">吃住安排</h4>
+        <p className="mt-1 text-xs text-[var(--app-text-secondary)]">与当日路线自然衔接的生活方式建议。</p>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <ResultLifestyleCard
+            title="午餐建议"
+            item={day.lunchSuggestion}
+            emptyText="当前片区午餐候选不足，可放宽距离或切换商圈。"
+            tone="meal"
+            onAction={editable ? () => onReplaceMeal?.("lunch") : undefined}
+            actionText="替换午餐"
+          />
+          <ResultLifestyleCard
+            title="晚餐建议"
+            item={day.dinnerSuggestion}
+            emptyText="当前片区晚餐候选不足，可放宽距离或切换商圈。"
+            tone="meal"
+            onAction={editable ? () => onReplaceMeal?.("dinner") : undefined}
+            actionText="替换晚餐"
+          />
+          <ResultLifestyleCard
+            title="酒店建议"
+            item={day.hotelSuggestion}
+            emptyText="当前区域酒店候选不足，建议扩大半径或提高预算。"
+            tone="hotel"
+            onAction={editable ? onReplaceHotel : undefined}
+            actionText="替换酒店"
+          />
+        </div>
+      </section>
     </section>
   )
 }

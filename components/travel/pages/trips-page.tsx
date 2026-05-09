@@ -1,28 +1,19 @@
-"use client"
+﻿"use client"
 
-import { useEffect, useMemo, useState, type ComponentType } from "react"
-import {
-  Bus,
-  Calendar,
-  Car,
-  ChevronRight,
-  Eye,
-  Footprints,
-  MapPin,
-  Navigation,
-  Plus,
-  Route,
-  Trash2,
-} from "lucide-react"
-import { useTravel, Spot } from "@/lib/travel-context"
-import {
-  MapView,
-  RouteMode,
-  RouteSummaryInfo,
-  TransportMode,
-} from "@/components/travel/map-view"
+import { useMemo, useState } from "react"
+import { Calendar, ChevronRight, Eye, MapPin, Trash2 } from "lucide-react"
+import { AppButton } from "@/components/ui/app-button"
+import { AppCard } from "@/components/ui/app-card"
+import { AppModal } from "@/components/ui/app-modal"
+import { EmptyStateCard } from "@/components/ui/empty-state-card"
+import { AppStatCard } from "@/components/ui/app-stat-card"
+import { AppTag } from "@/components/ui/app-tag"
+import { MapView, type RouteSummaryInfo } from "@/components/travel/map-view"
+import { SavedPlanCard } from "@/components/travel/saved-plan-card"
 import type { SpotNavigationIntent } from "@/lib/navigation"
-import { openRouteInAmapWeb } from "@/lib/open-map-route"
+import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
+import { resolvePlaceImage } from "@/lib/place-image"
+import { Spot, useTravel } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
 interface TripsPageProps {
@@ -30,27 +21,12 @@ interface TripsPageProps {
   onNavigate: (tab: "explore" | "ai") => void
   navigationIntent: SpotNavigationIntent | null
   onClearNavigationIntent: () => void
+  onOpenSavedPlan: (planId: string) => void
 }
 
-const MODE_OPTIONS: Array<{
-  id: TransportMode
-  label: string
-  icon: ComponentType<{ className?: string }>
-}> = [
-  { id: "driving", label: "驾车", icon: Car },
-  { id: "walking", label: "步行", icon: Footprints },
-  { id: "transit", label: "公交", icon: Bus },
-]
-
-const MODE_LABEL: Record<TransportMode, string> = {
-  driving: "驾车",
-  walking: "步行",
-  transit: "公交",
-}
-
-function createInitialSummary(mode: TransportMode): RouteSummaryInfo {
+function createPreviewSummary(): RouteSummaryInfo {
   return {
-    mode,
+    mode: "driving",
     status: "idle",
     distance: 0,
     duration: 0,
@@ -60,7 +36,7 @@ function createInitialSummary(mode: TransportMode): RouteSummaryInfo {
     endName: "--",
     waypointCount: 0,
     resolvedCount: 0,
-    message: "请选择行程点并开始路线规划",
+    message: "这里提供轻量预览，完整路线与交通建议请进入 AI 规划结果页。",
     partialErrors: [],
     fallbackRouteUrl: "",
   }
@@ -71,545 +47,347 @@ export function TripsPage({
   onNavigate,
   navigationIntent,
   onClearNavigationIntent,
+  onOpenSavedPlan,
 }: TripsPageProps) {
-  const { selectedSpots, removeSpot, clearSpots, savedPlans, deletePlan } =
-    useTravel()
+  const { selectedSpots, removeSpot, clearSpots, savedPlans, deletePlan, currentPlan } = useTravel()
   const [activeTab, setActiveTab] = useState<"current" | "saved">("current")
   const [showClearConfirm, setShowClearConfirm] = useState(false)
-  const [transportMode, setTransportMode] =
-    useState<TransportMode>("driving")
-  const [routeMode, setRouteMode] = useState<RouteMode>(
-    navigationIntent ? "fromMe" : "trip"
+  const [showMapPreview, setShowMapPreview] = useState(false)
+  const [previewSummary, setPreviewSummary] = useState<RouteSummaryInfo>(() =>
+    createPreviewSummary()
   )
-  const [fromMeSpotId, setFromMeSpotId] = useState<string | null>(
-    navigationIntent?.spot.id ?? null
-  )
-  const [routeSummary, setRouteSummary] = useState<RouteSummaryInfo>(() =>
-    createInitialSummary("driving")
+  const [shareFeedback, setShareFeedback] = useState("")
+
+  const totalPrice = useMemo(
+    () => selectedSpots.reduce((sum, spot) => sum + spot.ticketPrice, 0),
+    [selectedSpots]
   )
 
-  useEffect(() => {
-    if (navigationIntent) {
-      setRouteMode("fromMe")
-      setTransportMode(navigationIntent.mode)
-      setFromMeSpotId(navigationIntent.spot.id)
+  const daySummaries = useMemo(() => {
+    if (currentPlan?.days && currentPlan.days.length > 0) {
+      return currentPlan.days.map((day) => ({
+        day: day.day,
+        title: day.theme || `${day.day}日行程`,
+        spots: day.spots,
+        budget: day.totalEstimatedCost,
+      }))
     }
-  }, [navigationIntent])
+    if (selectedSpots.length === 0) return []
+    const groups: Array<{ day: number; title: string; spots: Spot[]; budget: number }> = []
+    for (let i = 0; i < selectedSpots.length; i += 4) {
+      const chunk = selectedSpots.slice(i, i + 4)
+      groups.push({
+        day: groups.length + 1,
+        title: `第${groups.length + 1}天候选路线`,
+        spots: chunk,
+        budget: chunk.reduce((sum, item) => sum + item.ticketPrice, 0),
+      })
+    }
+    return groups
+  }, [currentPlan?.days, selectedSpots])
 
-  const fromMeCandidates = useMemo(() => {
-    const bucket = new Map<string, Spot>()
-    if (navigationIntent?.spot) {
-      bucket.set(navigationIntent.spot.id, navigationIntent.spot)
-    }
-    for (const spot of selectedSpots) {
-      if (!bucket.has(spot.id)) {
-        bucket.set(spot.id, spot)
+  const planOverview = {
+    destination: currentPlan?.requirement?.city || selectedSpots[0]?.city || "待定目的地",
+    days: currentPlan?.totalDays || daySummaries.length || 0,
+    dateRange:
+      currentPlan?.startDate && currentPlan?.endDate
+        ? `${currentPlan.startDate} - ${currentPlan.endDate}`
+        : "待定日期",
+    budget: currentPlan?.totalEstimatedCost || totalPrice,
+    perCapita:
+      currentPlan?.totalEstimatedCost && currentPlan?.requirement
+        ? Math.round(currentPlan.totalEstimatedCost / Math.max(1, currentPlan.requirement.days))
+        : 0,
+    companions: currentPlan?.requirement?.companions || "friends",
+  }
+
+  const handleSharePlan = async (planId: string) => {
+    const plan = savedPlans.find((item) => item.id === planId)
+    if (!plan) return
+    const shareText = toShareSummaryText(buildPlanShareSummary(plan))
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(shareText)
+        setShareFeedback("分享摘要已复制到剪贴板")
+      } catch {
+        setShareFeedback("复制失败，请稍后重试")
       }
+    } else {
+      setShareFeedback("当前环境不支持剪贴板复制")
     }
-    return Array.from(bucket.values())
-  }, [navigationIntent?.spot, selectedSpots])
-
-  useEffect(() => {
-    if (fromMeCandidates.length === 0) {
-      if (fromMeSpotId !== null) {
-        setFromMeSpotId(null)
-      }
-      return
-    }
-    const exists = fromMeSpotId
-      ? fromMeCandidates.some((spot) => spot.id === fromMeSpotId)
-      : false
-    if (!exists) {
-      setFromMeSpotId(fromMeCandidates[0].id)
-    }
-  }, [fromMeCandidates, fromMeSpotId])
-
-  const totalPrice = selectedSpots.reduce((sum, spot) => sum + spot.ticketPrice, 0)
-  const hasSpots = selectedSpots.length > 0
-  const isFromMeMode = routeMode === "fromMe"
-  const fromMeSpot =
-    fromMeCandidates.find((spot) => spot.id === fromMeSpotId) ?? null
-
-  const startName =
-    routeSummary.startName !== "--"
-      ? routeSummary.startName
-      : isFromMeMode
-      ? "我的位置"
-      : selectedSpots[0]?.name || "--"
-  const endName =
-    routeSummary.endName !== "--"
-      ? routeSummary.endName
-      : isFromMeMode
-      ? fromMeSpot?.name || "--"
-      : selectedSpots[selectedSpots.length - 1]?.name || "--"
-  const waypointCount = isFromMeMode
-    ? 0
-    : Math.max(routeSummary.waypointCount, hasSpots ? selectedSpots.length - 2 : 0)
-
-  const summaryToneClass =
-    routeSummary.status === "route-error" || routeSummary.status === "map-error"
-      ? "bg-red-50 text-red-600"
-      : routeSummary.status === "partial-error" ||
-        routeSummary.status === "transit-degraded"
-      ? "bg-amber-50 text-amber-700"
-      : "bg-secondary text-muted-foreground"
+    window.setTimeout(() => setShareFeedback(""), 1600)
+  }
 
   return (
-    <div className="min-h-screen pb-24 animate-fade-in">
-      <header className="px-6 pt-12 pb-6">
-        <h1 className="text-2xl font-bold text-foreground mb-2">我的行程</h1>
-        <p className="text-muted-foreground">管理您的旅行计划与路线</p>
-      </header>
+    <div className="app-page animate-fade-in space-y-4">
+      <header className="space-y-3">
+        <div className="space-y-1">
+          <h1 className="app-page-title">行程手册</h1>
+          <p className="app-body">查看当前计划、地图预览和每日路线摘要，继续用 AI 深度优化行程。</p>
+        </div>
 
-      <div className="px-6 mb-5">
-        <div className="flex bg-secondary rounded-xl p-1">
+        <AppCard tone="elevated" padding="lg" className="soft-gradient space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="app-label">CURRENT PLAN</p>
+              <h2 className="mt-1 text-lg font-semibold text-[var(--app-text-strong)]">{planOverview.destination}</h2>
+              <p className="mt-1 text-xs text-[var(--app-text-secondary)]">{planOverview.dateRange}</p>
+            </div>
+            <AppTag tone="brand" className="numeric">{planOverview.days} 天</AppTag>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <AppStatCard label="总预算" value={`¥${Math.round(planOverview.budget)}`} />
+            <AppStatCard label="日均预算" value={`¥${Math.round(planOverview.perCapita)}`} />
+            <AppStatCard label="已选点位" value={selectedSpots.length} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <AppButton type="button" size="lg" onClick={() => onNavigate("ai")}>
+              继续 AI 规划
+              <ChevronRight className="h-[1.05rem] w-[1.05rem]" />
+            </AppButton>
+            <AppButton type="button" variant="secondary" size="lg" onClick={() => onNavigate("explore")}>
+              去添加地点
+            </AppButton>
+          </div>
+        </AppCard>
+
+        <div className="flex rounded-[var(--app-radius-sm)] bg-[var(--app-surface-muted)] p-1">
           <button
+            type="button"
             onClick={() => setActiveTab("current")}
             className={cn(
-              "flex-1 py-2.5 rounded-lg text-sm font-medium transition-all",
+              "flex-1 rounded-[0.65rem] py-2.5 text-sm font-medium transition-all",
               activeTab === "current"
-                ? "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-[var(--app-surface-elevated)] text-[var(--app-text-strong)] shadow-sm"
+                : "text-[var(--app-text-secondary)]"
             )}
           >
-            当前行程 ({selectedSpots.length})
+            当前计划
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab("saved")}
             className={cn(
-              "flex-1 py-2.5 rounded-lg text-sm font-medium transition-all",
+              "flex-1 rounded-[0.65rem] py-2.5 text-sm font-medium transition-all",
               activeTab === "saved"
-                ? "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-[var(--app-surface-elevated)] text-[var(--app-text-strong)] shadow-sm"
+                : "text-[var(--app-text-secondary)]"
             )}
           >
-            已保存 ({savedPlans.length})
+            已保存方案 ({savedPlans.length})
           </button>
         </div>
-      </div>
+      </header>
 
       {activeTab === "current" ? (
-        <div className="px-6 pb-28 space-y-4">
-          <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">路线规划</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  选择出行方式后，将根据当前行程点自动规划路线
-                </p>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {MODE_OPTIONS.map((modeOption) => {
-                  const Icon = modeOption.icon
-                  const active = transportMode === modeOption.id
-                  return (
-                  <button
-                      key={modeOption.id}
-                      onClick={() => {
-                        setTransportMode(modeOption.id)
-                        setRouteSummary((prev) => ({ ...prev, mode: modeOption.id }))
-                      }}
-                      className={cn(
-                        "px-2 py-2 rounded-xl min-w-[56px] transition-all border",
-                        active
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-secondary/80 text-foreground border-transparent hover:bg-secondary"
-                      )}
-                    >
-                      <Icon className="w-4 h-4 mx-auto mb-1" />
-                      <span className="text-xs font-medium">{modeOption.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="space-y-4 pb-10">
+          <AppCard tone="soft" padding="md" className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-[var(--app-text-primary)]">路线地图预览</p>
               <button
                 type="button"
-                onClick={() => setRouteMode("trip")}
-                className={cn(
-                  "px-3 py-2 rounded-lg text-xs font-medium transition-colors",
-                  routeMode === "trip"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-foreground hover:bg-secondary/80"
-                )}
+                onClick={() => setShowMapPreview((prev) => !prev)}
+                className="text-xs font-medium text-[var(--app-brand)]"
               >
-                行程点路线
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRouteMode("fromMe")
-                }}
-                className={cn(
-                  "px-3 py-2 rounded-lg text-xs font-medium transition-colors",
-                  routeMode === "fromMe"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-foreground hover:bg-secondary/80"
-                )}
-              >
-                我到景点导航
+                {showMapPreview ? "收起" : "展开"}
               </button>
             </div>
-
-            {routeMode === "fromMe" && (
-              <div className="mt-3 rounded-xl bg-secondary/40 px-3 py-2">
-                <p className="text-[11px] text-muted-foreground mb-2">导航目标</p>
-                {fromMeCandidates.length > 0 ? (
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {fromMeCandidates.map((spot) => (
-                      <button
-                        key={spot.id}
-                        type="button"
-                        onClick={() => setFromMeSpotId(spot.id)}
-                        className={cn(
-                          "shrink-0 px-3 py-1.5 rounded-full text-xs border transition-colors",
-                          fromMeSpotId === spot.id
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-card text-foreground border-border hover:bg-secondary"
-                        )}
-                      >
-                        {spot.name}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    还没有可导航的景点，请先在探索页添加行程点，或在景点详情点击“导航前往”。
-                  </p>
-                )}
-              </div>
-            )}
 
             {navigationIntent && (
-              <div className="mt-3 rounded-xl bg-primary/5 border border-primary/15 px-3 py-2 text-xs text-foreground flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="font-medium">当前导航目标：{navigationIntent.spot.name}</p>
-                  {navigationIntent.notice && (
-                    <p className="text-muted-foreground">{navigationIntent.notice}</p>
-                  )}
-                </div>
-                <button
-                  onClick={onClearNavigationIntent}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
+              <div className="flex items-center justify-between gap-2 rounded-[var(--app-radius-sm)] bg-[var(--app-brand-soft)] px-3 py-2 text-xs text-[var(--brand-deep)]">
+                <span>已接收导航目标：{navigationIntent.spot.name}</span>
+                <button type="button" onClick={onClearNavigationIntent} className="underline-offset-2 hover:underline">
                   清除
                 </button>
               </div>
             )}
 
-            <div className="mt-3 rounded-xl bg-secondary/50 px-3 py-2 flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                {isFromMeMode
-                  ? "已进入单点导航模式，地图将规划“我的位置 → 当前景点”路线"
-                  : `已添加 ${selectedSpots.length} 个行程点，去探索页可继续添加具体位置`}
-              </p>
-              <button
-                onClick={() => onNavigate("explore")}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                添加行程点
-              </button>
-            </div>
-          </section>
-
-          <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-3">
-            <MapView
-              spots={selectedSpots}
-              transportMode={transportMode}
-              routeMode={routeMode}
-              fromMeTarget={isFromMeMode ? fromMeSpot : null}
-              fromMeOrigin={isFromMeMode ? navigationIntent?.origin || null : null}
-              fromMeRequestId={isFromMeMode ? navigationIntent?.requestId : undefined}
-              onSummaryChange={setRouteSummary}
-            />
-          </section>
-
-          <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Route className="w-4 h-4 text-primary" />
-                <h3 className="font-semibold text-foreground">路线摘要</h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-muted-foreground">
-                  {isFromMeMode ? "我到景点导航" : "行程点路线"}
-                </span>
-                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                  {MODE_LABEL[routeSummary.mode]}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-secondary/70 p-3">
-                <p className="text-xs text-muted-foreground mb-1">总距离</p>
-                <p className="text-base font-semibold text-foreground">
-                  {routeSummary.distanceText}
+            {showMapPreview && selectedSpots.length > 0 && (
+              <>
+                <MapView
+                  spots={selectedSpots}
+                  transportMode="driving"
+                  routeMode="trip"
+                  onSummaryChange={setPreviewSummary}
+                />
+                <p className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-xs text-[var(--app-text-secondary)]">
+                  {previewSummary.message}
                 </p>
-              </div>
-              <div className="rounded-xl bg-secondary/70 p-3">
-                <p className="text-xs text-muted-foreground mb-1">预计耗时</p>
-                <p className="text-base font-semibold text-foreground">
-                  {routeSummary.durationText}
-                </p>
-              </div>
-            </div>
+              </>
+            )}
+          </AppCard>
 
-            <div className="mt-3 rounded-xl bg-secondary/40 p-3 space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-foreground">
-                <MapPin className="w-4 h-4 text-primary" />
-                <span className="text-muted-foreground min-w-[46px]">起点</span>
-                <span className="font-medium truncate">{startName}</span>
+          {daySummaries.length > 0 && (
+            <AppCard tone="elevated" padding="md" className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[var(--app-text-strong)]">每日行程摘要</h3>
+                <AppTag tone="info">旅行手册视图</AppTag>
               </div>
-              <div className="flex items-center gap-2 text-foreground">
-                <Navigation className="w-4 h-4 text-primary" />
-                <span className="text-muted-foreground min-w-[46px]">终点</span>
-                <span className="font-medium truncate">{endName}</span>
+              <div className="space-y-2.5">
+                {daySummaries.map((day) => (
+                  <article key={`summary-${day.day}`} className="rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs text-[var(--app-text-muted)]">第 {day.day} 天</p>
+                        <h4 className="mt-1 text-sm font-semibold text-[var(--app-text-strong)]">{day.title}</h4>
+                      </div>
+                      <span className="numeric rounded-full bg-[var(--app-surface-elevated)] px-2.5 py-1 text-xs text-[var(--app-text-secondary)]">
+                        预算 ¥{Math.round(day.budget || 0)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-[var(--app-text-secondary)] line-clamp-2">
+                      {day.spots.map((spot) => spot.name).join(" · ")}
+                    </p>
+                  </article>
+                ))}
               </div>
-              <div className="flex items-center gap-2 text-foreground">
-                <MapPin className="w-4 h-4 text-primary" />
-                <span className="text-muted-foreground min-w-[46px]">途经点</span>
-                <span className="font-medium">{Math.max(0, waypointCount)} 个</span>
-              </div>
-            </div>
+            </AppCard>
+          )}
 
-            <div className={cn("mt-3 rounded-xl p-3 text-xs leading-5", summaryToneClass)}>
-              {routeSummary.message}
-            </div>
-
-            {routeSummary.fallbackRouteUrl &&
-              (routeSummary.status === "route-error" ||
-                routeSummary.status === "map-error" ||
-                routeSummary.status === "transit-degraded") && (
-              <div className="mt-2 rounded-xl bg-secondary/50 p-3">
+          <AppCard tone="elevated" padding="md">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[var(--app-text-strong)]">候选地点清单</h3>
+              {selectedSpots.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => openRouteInAmapWeb(routeSummary.fallbackRouteUrl || "")}
-                  className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+                  onClick={() => setShowClearConfirm(true)}
+                  className="text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-error)]"
                 >
-                  打开高德地图导航（兜底）
+                  清空全部
                 </button>
-              </div>
-            )}
-
-            {routeSummary.partialErrors.length > 0 && (
-              <div className="mt-2 rounded-xl bg-amber-50 text-amber-700 p-3 text-xs leading-5">
-                {routeSummary.partialErrors[0]}
-                {routeSummary.partialErrors.length > 1 &&
-                  `（另有 ${routeSummary.partialErrors.length - 1} 个景点被跳过）`}
-              </div>
-            )}
-          </section>
-
-          <section className="bg-card rounded-2xl border border-border/60 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="font-semibold text-foreground">行程点列表</h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  共 {selectedSpots.length} 个地点 · 预估花费 ¥{totalPrice}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onNavigate("explore")}
-                  className="px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/15 transition-colors"
-                >
-                  继续添加
-                </button>
-                {hasSpots && (
-                  <button
-                    onClick={() => setShowClearConfirm(true)}
-                    className="text-sm text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    清空全部
-                  </button>
-                )}
-              </div>
+              )}
             </div>
 
-            {hasSpots ? (
+            {selectedSpots.length === 0 ? (
+              <EmptyStateCard
+                title="还没有加入地点"
+                description="去探索页添加景点、美食或酒店。"
+                actionLabel="去探索"
+                onAction={() => onNavigate("explore")}
+                icon={MapPin}
+              />
+            ) : (
               <div className="space-y-3">
                 {selectedSpots.map((spot, index) => (
                   <article
                     key={spot.id}
-                    className="rounded-xl border border-border/60 bg-background/50 p-3"
+                    className="rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface)] p-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-semibold flex items-center justify-center flex-shrink-0">
+                      <div className="numeric flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-[11px] font-semibold text-[var(--app-brand)]">
                         {index + 1}
                       </div>
                       <img
-                        src={spot.image}
+                        src={resolvePlaceImage({
+                          id: spot.id,
+                          name: spot.name,
+                          city: spot.city,
+                          province: spot.province,
+                          image: spot.image,
+                          coverImage: spot.image,
+                        })}
                         alt={spot.name}
-                        className="w-16 h-16 rounded-xl object-cover flex-shrink-0"
+                        className="h-14 w-14 flex-shrink-0 rounded-[0.8rem] object-cover"
+                        onError={(event) => {
+                          event.currentTarget.src = resolvePlaceImage({
+                            city: spot.city,
+                            province: spot.province,
+                            name: spot.name,
+                          })
+                        }}
                       />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-foreground truncate">
-                          {spot.name}
-                        </h4>
-                        <p className="text-xs text-muted-foreground truncate mt-1">
-                          {spot.address}
-                        </p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="text-xs px-2 py-0.5 rounded-md bg-secondary">
+                      <div className="min-w-0 flex-1">
+                        <h4 className="truncate text-sm font-semibold text-[var(--app-text-strong)]">{spot.name}</h4>
+                        <p className="mt-1 truncate text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <AppTag>
                             {spot.type === "attraction"
                               ? "景点"
                               : spot.type === "restaurant"
                               ? "美食"
-                              : "住宿"}
-                          </span>
-                          <span className="text-sm text-primary font-medium">
+                              : "酒店"}
+                          </AppTag>
+                          <span className="numeric text-sm font-medium text-[var(--app-brand)]">
                             {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
                           </span>
                         </div>
                       </div>
-                      <div className="flex flex-col gap-2 flex-shrink-0">
+                      <div className="flex flex-shrink-0 flex-col gap-2">
                         <button
+                          type="button"
                           onClick={() => onViewSpot(spot)}
-                          className="h-8 w-8 rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors flex items-center justify-center"
+                          className="flex h-8 w-8 items-center justify-center rounded-[0.7rem] bg-[var(--app-surface-muted)] text-[var(--app-text-primary)]"
                         >
-                          <Eye className="w-4 h-4" />
+                          <Eye className="h-4 w-4" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => removeSpot(spot.id)}
-                          className="h-8 w-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex items-center justify-center"
+                          className="flex h-8 w-8 items-center justify-center rounded-[0.7rem] bg-[color:rgba(184,90,77,0.12)] text-[var(--app-error)]"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
                   </article>
                 ))}
               </div>
-            ) : (
-              <div className="rounded-xl bg-secondary/40 p-6 text-center">
-                <MapPin className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-foreground font-medium mb-1">
-                  还没有添加行程点
-                </p>
-                <p className="text-xs text-muted-foreground mb-4">
-                  去探索页面发现精彩目的地吧
-                </p>
-                <button
-                  onClick={() => onNavigate("explore")}
-                  className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-                >
-                  开始探索
-                </button>
-              </div>
             )}
-          </section>
-
-          <button
-            onClick={() => onNavigate("ai")}
-            className="w-full py-4 bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-opacity btn-press flex items-center justify-center gap-2"
-          >
-            <span>使用AI智能规划行程</span>
-            <ChevronRight className="w-5 h-5" />
-          </button>
+          </AppCard>
+        </div>
+      ) : savedPlans.length === 0 ? (
+        <div className="py-8">
+          <EmptyStateCard
+            title="暂无已保存方案"
+            description="先去 AI 规划页生成并保存你的旅行方案。"
+            actionLabel="进入 AI 规划"
+            onAction={() => onNavigate("ai")}
+            icon={Calendar}
+          />
         </div>
       ) : (
-        <>
-          {savedPlans.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-secondary flex items-center justify-center">
-                <Calendar className="w-10 h-10 text-muted-foreground" />
-              </div>
-              <h3 className="text-xl font-bold text-foreground mb-2">暂无保存的行程</h3>
-              <p className="text-muted-foreground mb-6">
-                使用AI规划功能生成并保存您的旅行计划
-              </p>
-              <button
-                onClick={() => onNavigate("ai")}
-                className="px-6 py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors btn-press"
-              >
-                开始AI规划
-              </button>
-            </div>
-          ) : (
-            <div className="px-6 space-y-4 pb-28">
-              {savedPlans.map((plan) => (
-                <div
-                  key={plan.id}
-                  className="bg-card rounded-2xl p-5 border border-border/50 card-hover"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-bold text-foreground text-lg">{plan.name}</h3>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                        <Calendar className="w-4 h-4" />
-                        <span>
-                          {plan.startDate} - {plan.endDate}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => deletePlan(plan.id)}
-                      className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="px-2 py-1 bg-secondary rounded-lg text-xs font-medium">
-                      {plan.spots.length} 个地点
-                    </span>
-                    <span className="px-2 py-1 bg-secondary rounded-lg text-xs font-medium">
-                      {plan.pace}节奏
-                    </span>
-                    <span className="px-2 py-1 bg-secondary rounded-lg text-xs font-medium">
-                      {plan.departure}出发
-                    </span>
-                  </div>
-                  <div className="flex -space-x-2">
-                    {plan.spots.slice(0, 4).map((spot) => (
-                      <img
-                        key={spot.id}
-                        src={spot.image}
-                        alt={spot.name}
-                        className="w-10 h-10 rounded-full border-2 border-card object-cover"
-                      />
-                    ))}
-                    {plan.spots.length > 4 && (
-                      <div className="w-10 h-10 rounded-full bg-secondary border-2 border-card flex items-center justify-center text-xs font-medium text-muted-foreground">
-                        +{plan.spots.length - 4}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+        <div className="space-y-4 pb-10">
+          {savedPlans.map((plan) => (
+            <SavedPlanCard
+              key={plan.id}
+              plan={plan}
+              onOpen={() => onOpenSavedPlan(plan.id)}
+              onDelete={() => deletePlan(plan.id)}
+              onShare={() => void handleSharePlan(plan.id)}
+            />
+          ))}
+        </div>
       )}
 
-      {showClearConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in">
-          <div className="bg-card rounded-2xl p-6 mx-6 max-w-sm w-full animate-scale-in">
-            <h3 className="text-lg font-bold text-foreground mb-2">确认清空</h3>
-            <p className="text-muted-foreground mb-6">
-              确定要清空所有行程点吗？此操作无法撤销。
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                className="flex-1 py-3 bg-secondary text-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors btn-press"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  clearSpots()
-                  setShowClearConfirm(false)
-                }}
-                className="flex-1 py-3 bg-destructive text-destructive-foreground rounded-xl font-medium hover:bg-destructive/90 transition-colors btn-press"
-              >
-                确认清空
-              </button>
-            </div>
-          </div>
+      <AppModal
+        open={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        title="确认清空"
+        description="确定要清空所有已选内容吗？"
+      >
+        <div className="grid grid-cols-2 gap-2.5">
+          <AppButton type="button" onClick={() => setShowClearConfirm(false)} variant="secondary" size="lg">
+            取消
+          </AppButton>
+          <AppButton
+            type="button"
+            onClick={() => {
+              clearSpots()
+              setShowClearConfirm(false)
+            }}
+            variant="danger"
+            size="lg"
+          >
+            确认清空
+          </AppButton>
+        </div>
+      </AppModal>
+
+      {shareFeedback && (
+        <div className="fixed left-1/2 top-16 z-[70] -translate-x-1/2 rounded-[var(--app-radius-sm)] bg-[var(--app-text-strong)] px-4 py-2 text-sm text-white shadow-lg">
+          {shareFeedback}
         </div>
       )}
     </div>

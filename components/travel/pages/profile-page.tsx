@@ -1,261 +1,640 @@
-"use client"
+﻿"use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  User,
+  Bell,
+  CalendarDays,
+  ChevronRight,
+  Globe,
   Heart,
-  Settings,
   HelpCircle,
   LogOut,
-  ChevronRight,
-  Bell,
-  Moon,
-  Globe,
-  Shield,
-  MessageSquare,
-  Star,
   MapPin,
-  Calendar,
+  MessageSquare,
+  Moon,
+  Settings,
+  Shield,
+  Sparkles,
+  Star,
+  User,
 } from "lucide-react"
-import { useTravel, sampleSpots, Spot } from "@/lib/travel-context"
+import { useTheme } from "next-themes"
+import { AppButton } from "@/components/ui/app-button"
+import { AppCard } from "@/components/ui/app-card"
+import { EmptyStateCard } from "@/components/ui/empty-state-card"
+import { AppIconButton } from "@/components/ui/app-icon-button"
+import { AppPageHeader } from "@/components/ui/app-page-header"
+import { AppStatCard } from "@/components/ui/app-stat-card"
+import { AppTag } from "@/components/ui/app-tag"
+import { CalendarPage } from "@/components/travel/calendar-page"
+import { MobileSheet } from "@/components/travel/mobile-sheet"
+import { ProfileSubpage } from "@/components/travel/profile-subpage"
+import { SavedPlanCard } from "@/components/travel/saved-plan-card"
+import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
+import { resolvePlaceImage } from "@/lib/place-image"
+import {
+  AppLanguage,
+  getStoredLanguage,
+  LANGUAGE_LABELS,
+  setStoredLanguage,
+} from "@/lib/theme-storage"
+import { sampleSpots, type Spot, useTravel } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
 interface ProfilePageProps {
   onViewSpot: (spot: Spot) => void
+  onOpenSavedPlan: (planId: string) => void
 }
 
-const menuItems = [
-  { icon: Bell, label: "消息通知", badge: 3 },
-  { icon: Heart, label: "我的收藏" },
-  { icon: Star, label: "我的评价" },
-  { icon: Globe, label: "语言设置", value: "简体中文" },
-  { icon: Moon, label: "深色模式", toggle: true },
-  { icon: Shield, label: "隐私设置" },
-  { icon: HelpCircle, label: "帮助与反馈" },
-  { icon: MessageSquare, label: "联系客服" },
+type ActionId =
+  | "notification"
+  | "favorites"
+  | "reviews"
+  | "language"
+  | "darkMode"
+  | "privacy"
+  | "help"
+  | "contact"
+  | "settings"
+  | "calendar"
+  | "footprint"
+  | "logout"
+
+type ActiveSheet = "language" | "settings" | null
+type ActiveSubpage =
+  | "notification"
+  | "favorites"
+  | "reviews"
+  | "privacy"
+  | "help"
+  | "contact"
+  | "calendar"
+  | "footprint"
+  | null
+
+const MENU_ITEMS: Array<{
+  id: ActionId
+  icon: typeof Bell
+  label: string
+  toggle?: boolean
+}> = [
+  { id: "notification", icon: Bell, label: "消息通知" },
+  { id: "favorites", icon: Heart, label: "我的收藏" },
+  { id: "reviews", icon: Star, label: "我的点评" },
+  { id: "language", icon: Globe, label: "语言设置" },
+  { id: "darkMode", icon: Moon, label: "深色模式", toggle: true },
+  { id: "privacy", icon: Shield, label: "隐私设置" },
+  { id: "help", icon: HelpCircle, label: "帮助与反馈" },
+  { id: "contact", icon: MessageSquare, label: "联系客服" },
 ]
 
-export function ProfilePage({ onViewSpot }: ProfilePageProps) {
-  const { favorites, savedPlans, selectedSpots, toggleFavorite } = useTravel()
-  const [darkMode, setDarkMode] = useState(false)
-  const [showFavorites, setShowFavorites] = useState(false)
+const SUBPAGE_TITLE: Record<Exclude<ActiveSubpage, null>, string> = {
+  notification: "消息通知",
+  favorites: "我的收藏",
+  reviews: "我的点评",
+  privacy: "隐私设置",
+  help: "帮助与反馈",
+  contact: "联系客服",
+  calendar: "旅行日历",
+  footprint: "旅行足迹",
+}
 
-  const favoriteSpots = sampleSpots.filter((s) => favorites.includes(s.id))
+export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
+  const { favorites, savedPlans, selectedSpots, toggleFavorite, deletePlan } = useTravel()
+  const { theme, resolvedTheme, setTheme } = useTheme()
 
-  // 统计数据
+  const [language, setLanguage] = useState<AppLanguage>("zh-CN")
+  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null)
+  const [activeSubpage, setActiveSubpage] = useState<ActiveSubpage>(null)
+  const [feedback, setFeedback] = useState("")
+
+  const isDarkMode = (resolvedTheme ?? theme) === "dark"
+
+  useEffect(() => {
+    setLanguage(getStoredLanguage())
+  }, [])
+
+  const favoriteSpots = useMemo(
+    () => sampleSpots.filter((spot) => favorites.includes(spot.id)),
+    [favorites]
+  )
+
+  const notifications = useMemo(
+    () => [
+      {
+        id: "notice-plan",
+        title:
+          savedPlans.length > 0
+            ? `你已保存 ${savedPlans.length} 个行程方案，可继续优化路线。`
+            : "欢迎使用途境漫语，先去探索页添加地点吧。",
+        time: "刚刚",
+      },
+      {
+        id: "notice-trip",
+        title:
+          selectedSpots.length > 0
+            ? `当前行程清单有 ${selectedSpots.length} 个地点。`
+            : "当前行程清单为空，可从探索页快速加入。",
+        time: "今天",
+      },
+    ],
+    [savedPlans.length, selectedSpots.length]
+  )
+
+  const footprintSpots = useMemo(() => {
+    const bucket = new Map<string, Spot>()
+    ;[...selectedSpots, ...favoriteSpots].forEach((spot) => {
+      if (!bucket.has(spot.id)) bucket.set(spot.id, spot)
+    })
+    return Array.from(bucket.values())
+  }, [favoriteSpots, selectedSpots])
+
+  const footprintCities = useMemo(() => {
+    const bucket = new Set<string>()
+    footprintSpots.forEach((spot) => {
+      if (spot.city?.trim()) bucket.add(spot.city.trim())
+    })
+    return Array.from(bucket)
+  }, [footprintSpots])
+
   const stats = {
     trips: savedPlans.length,
     favorites: favorites.length,
     spots: selectedSpots.length,
   }
 
+  const showFeedback = (message: string) => {
+    setFeedback(message)
+    window.setTimeout(() => setFeedback(""), 1700)
+  }
+
+  const toggleDarkMode = () => {
+    const nextTheme = isDarkMode ? "light" : "dark"
+    setTheme(nextTheme)
+    showFeedback(nextTheme === "dark" ? "已切换为深色模式" : "已切换为浅色模式")
+  }
+
+  const changeLanguage = (nextLanguage: AppLanguage) => {
+    setLanguage(nextLanguage)
+    setStoredLanguage(nextLanguage)
+    showFeedback(`语言已切换为 ${LANGUAGE_LABELS[nextLanguage]}`)
+    setActiveSheet(null)
+  }
+
+  const openSubpage = (target: ActiveSubpage) => {
+    setActiveSheet(null)
+    setActiveSubpage(target)
+  }
+
+  const handleAction = (id: ActionId) => {
+    if (id === "darkMode") {
+      toggleDarkMode()
+      return
+    }
+    if (id === "logout") {
+      showFeedback("退出登录功能开发中")
+      return
+    }
+    if (id === "language") {
+      setActiveSubpage(null)
+      setActiveSheet("language")
+      return
+    }
+    if (id === "settings") {
+      setActiveSubpage(null)
+      setActiveSheet("settings")
+      return
+    }
+    openSubpage(id as ActiveSubpage)
+  }
+
+  const closeAllOverlays = () => {
+    setActiveSubpage(null)
+    setActiveSheet(null)
+  }
+
+  const shareSavedPlan = async (planId: string) => {
+    const plan = savedPlans.find((item) => item.id === planId)
+    if (!plan) return
+    const shareText = toShareSummaryText(buildPlanShareSummary(plan))
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(shareText)
+        showFeedback("分享摘要已复制到剪贴板")
+      } catch {
+        showFeedback("复制失败，请稍后重试")
+      }
+      return
+    }
+    showFeedback("当前环境不支持剪贴板复制")
+  }
+
   return (
-    <div className="min-h-screen pb-24 animate-fade-in">
-      {/* Header with Profile */}
-      <header className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary/80 to-accent" />
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-        <div className="relative px-6 pt-12 pb-8">
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 rounded-full bg-white/20 border-3 border-white/50 flex items-center justify-center">
-              <User className="w-10 h-10 text-white" />
-            </div>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-white mb-1">旅行者</h1>
-              <p className="text-white/80 text-sm">探索世界，发现美好</p>
-            </div>
-            <button className="p-2 rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors">
-              <Settings className="w-5 h-5" />
-            </button>
+    <div className="app-page animate-fade-in space-y-4">
+      <AppCard tone="elevated" padding="md" className="soft-gradient relative overflow-hidden">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[color:rgba(93,111,47,0.14)] blur-2xl" />
+
+        <div className="relative">
+          <AppPageHeader
+            label="TRAVEL IDENTITY"
+            title="旅行者中心"
+            subtitle="偏好、收藏、足迹和账号管理"
+            trailing={
+              <div className="flex items-center gap-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/75 bg-white/88">
+                  <User className="h-5 w-5 text-[var(--app-brand)]" />
+                </div>
+                <AppIconButton
+                  type="button"
+                  onClick={() => handleAction("settings")}
+                  variant="secondary"
+                  size="md"
+                  aria-label="打开设置"
+                  className="bg-white/92"
+                >
+                  <Settings className="h-[1rem] w-[1rem]" />
+                </AppIconButton>
+              </div>
+            }
+          />
+        </div>
+
+        <div className="mt-3.5 grid grid-cols-3 gap-2">
+          <AppStatCard label="已保存行程" value={stats.trips} />
+          <AppStatCard label="收藏地点" value={stats.favorites} />
+          <AppStatCard label="当前清单" value={stats.spots} />
+        </div>
+      </AppCard>
+
+      <AppCard tone="elevated" padding="md" className="hero-scenic-bg relative overflow-hidden text-white">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(20,28,14,0.08)_0%,rgba(20,28,14,0.36)_100%)]" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div>
+            <p className="app-label text-white/80">MEMBER PRIVILEGE</p>
+            <h2 className="mt-1 text-lg font-semibold">探索会员 · Green Voyager</h2>
+            <p className="mt-1 text-xs text-white/85">专享 AI 规划优先队列、出行模板和年度路线报告。</p>
+          </div>
+          <AppTag className="border-white/25 bg-white/16 text-white">Lv.2</AppTag>
+        </div>
+        <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
+            <p className="numeric text-sm font-semibold">12</p>
+            <p className="text-[10px] text-white/85">可用模板</p>
+          </div>
+          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
+            <p className="numeric text-sm font-semibold">4</p>
+            <p className="text-[10px] text-white/85">专属权益</p>
+          </div>
+          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
+            <p className="numeric text-sm font-semibold">2026</p>
+            <p className="text-[10px] text-white/85">有效至</p>
           </div>
         </div>
-      </header>
+      </AppCard>
 
-      {/* Stats Cards */}
-      <div className="px-6 -mt-4 relative z-10">
-        <div className="bg-card rounded-2xl p-4 shadow-lg border border-border/50">
-          <div className="grid grid-cols-3 divide-x divide-border">
-            <div className="text-center px-2">
-              <div className="text-2xl font-bold text-primary">{stats.trips}</div>
-              <div className="text-xs text-muted-foreground mt-1">已保存行程</div>
-            </div>
-            <div className="text-center px-2">
-              <div className="text-2xl font-bold text-primary">{stats.favorites}</div>
-              <div className="text-xs text-muted-foreground mt-1">收藏地点</div>
-            </div>
-            <div className="text-center px-2">
-              <div className="text-2xl font-bold text-primary">{stats.spots}</div>
-              <div className="text-xs text-muted-foreground mt-1">当前行程点</div>
-            </div>
-          </div>
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="app-section-title">旅行偏好与记录</h2>
+          <AppTag tone="info">持续更新</AppTag>
         </div>
-      </div>
 
-      {/* Quick Actions */}
-      <div className="px-6 py-6">
-        <h2 className="text-lg font-bold text-foreground mb-4">快捷功能</h2>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-2.5">
           <button
-            onClick={() => setShowFavorites(true)}
-            className="flex flex-col items-center gap-2 p-3 bg-card rounded-xl border border-border/50 hover:border-primary/30 transition-all btn-press"
+            type="button"
+            onClick={() => handleAction("favorites")}
+            className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
           >
-            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
-              <Heart className="w-5 h-5 text-red-500" />
+            <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color:rgba(183,91,80,0.14)] text-[var(--app-error)]">
+              <Heart className="h-4 w-4" />
             </div>
-            <span className="text-xs font-medium text-foreground">收藏</span>
+            <p className="text-sm font-medium text-[var(--app-text-primary)]">我的收藏</p>
+            <p className="mt-1 text-xs text-[var(--app-text-secondary)]">已收藏 {favorites.length} 个地点</p>
           </button>
-          <button className="flex flex-col items-center gap-2 p-3 bg-card rounded-xl border border-border/50 hover:border-primary/30 transition-all btn-press">
-            <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center">
-              <Star className="w-5 h-5 text-amber-500" />
+          <button
+            type="button"
+            onClick={() => handleAction("calendar")}
+            className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
+          >
+            <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color:rgba(108,131,118,0.14)] text-[var(--app-info)]">
+              <CalendarDays className="h-4 w-4" />
             </div>
-            <span className="text-xs font-medium text-foreground">评价</span>
+            <p className="text-sm font-medium text-[var(--app-text-primary)]">旅行日历</p>
+            <p className="mt-1 text-xs text-[var(--app-text-secondary)]">查看行程日期与安排</p>
           </button>
-          <button className="flex flex-col items-center gap-2 p-3 bg-card rounded-xl border border-border/50 hover:border-primary/30 transition-all btn-press">
-            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-blue-500" />
+          <button
+            type="button"
+            onClick={() => handleAction("footprint")}
+            className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
+          >
+            <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-[var(--app-brand)]">
+              <MapPin className="h-4 w-4" />
             </div>
-            <span className="text-xs font-medium text-foreground">日历</span>
+            <p className="text-sm font-medium text-[var(--app-text-primary)]">旅行足迹</p>
+            <p className="mt-1 text-xs text-[var(--app-text-secondary)]">覆盖 {footprintCities.length} 个城市</p>
           </button>
-          <button className="flex flex-col items-center gap-2 p-3 bg-card rounded-xl border border-border/50 hover:border-primary/30 transition-all btn-press">
-            <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center">
-              <MapPin className="w-5 h-5 text-green-500" />
+          <button
+            type="button"
+            onClick={() => handleAction("notification")}
+            className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
+          >
+            <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--app-surface-muted)] text-[var(--app-text-primary)]">
+              <Bell className="h-4 w-4" />
             </div>
-            <span className="text-xs font-medium text-foreground">足迹</span>
+            <p className="text-sm font-medium text-[var(--app-text-primary)]">消息通知</p>
+            <p className="mt-1 text-xs text-[var(--app-text-secondary)]">{notifications.length} 条新提醒</p>
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* Menu List */}
-      <div className="px-6">
-        <h2 className="text-lg font-bold text-foreground mb-4">设置</h2>
-        <div className="bg-card rounded-2xl border border-border/50 overflow-hidden">
-          {menuItems.map((item, index) => {
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+        <h2 className="app-section-title">已保存方案</h2>
+        <span className="numeric text-xs text-[var(--app-text-secondary)]">{savedPlans.length} 个</span>
+      </div>
+        {savedPlans.length === 0 ? (
+          <EmptyStateCard
+            title="暂无已保存方案"
+            description="去 AI 规划页生成并保存第一份旅行方案。"
+            icon={CalendarDays}
+          />
+        ) : (
+          savedPlans.slice(0, 3).map((plan) => (
+            <SavedPlanCard
+              key={plan.id}
+              plan={plan}
+              onOpen={() => onOpenSavedPlan(plan.id)}
+              onDelete={() => {
+                deletePlan(plan.id)
+                showFeedback(`已删除：${plan.name}`)
+              }}
+              onShare={() => void shareSavedPlan(plan.id)}
+            />
+          ))
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 app-section-title">设置</h2>
+        <AppCard tone="elevated" padding="none" className="overflow-hidden">
+          {MENU_ITEMS.map((item, index) => {
             const Icon = item.icon
+            const badge = item.id === "notification" ? notifications.length : 0
             return (
               <button
-                key={item.label}
+                key={item.id}
+                type="button"
                 className={cn(
-                  "w-full flex items-center gap-4 px-4 py-4 hover:bg-secondary/50 transition-colors",
-                  index !== menuItems.length - 1 && "border-b border-border/50"
+                  "w-full px-4 py-3.5 text-left transition-colors hover:bg-[var(--app-surface)]",
+                  index !== MENU_ITEMS.length - 1 && "border-b border-[var(--app-line)]"
                 )}
-                onClick={() => {
-                  if (item.toggle) {
-                    setDarkMode(!darkMode)
-                  }
-                }}
+                onClick={() => handleAction(item.id)}
               >
-                <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
-                  <Icon className="w-5 h-5 text-foreground" />
-                </div>
-                <span className="flex-1 text-left font-medium text-foreground">{item.label}</span>
-                {item.badge && (
-                  <span className="px-2 py-0.5 bg-primary text-primary-foreground text-xs font-bold rounded-full">
-                    {item.badge}
-                  </span>
-                )}
-                {item.value && (
-                  <span className="text-sm text-muted-foreground">{item.value}</span>
-                )}
-                {item.toggle ? (
-                  <div
-                    className={cn(
-                      "w-12 h-7 rounded-full transition-colors relative",
-                      darkMode ? "bg-primary" : "bg-border"
-                    )}
-                  >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--app-surface-muted)] text-[var(--app-text-primary)]">
+                    <Icon className="h-[1.125rem] w-[1.125rem]" />
+                  </div>
+                  <span className="flex-1 text-sm font-medium text-[var(--app-text-primary)]">{item.label}</span>
+                  {badge > 0 && (
+                    <span className="numeric rounded-full bg-[var(--app-brand)] px-2 py-0.5 text-xs font-semibold text-white">
+                      {badge}
+                    </span>
+                  )}
+                  {item.id === "language" && (
+                    <span className="text-xs text-[var(--app-text-secondary)]">{LANGUAGE_LABELS[language]}</span>
+                  )}
+                  {item.toggle ? (
                     <div
                       className={cn(
-                        "absolute w-5 h-5 bg-white rounded-full top-1 transition-all shadow",
-                        darkMode ? "left-6" : "left-1"
+                        "relative h-6 w-11 rounded-full transition-colors",
+                        isDarkMode ? "bg-[var(--app-brand)]" : "bg-[var(--app-line)]"
                       )}
-                    />
-                  </div>
-                ) : (
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                )}
+                    >
+                      <div
+                        className={cn(
+                          "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                          isDarkMode ? "left-5.5" : "left-0.5"
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    <ChevronRight className="h-[1.125rem] w-[1.125rem] text-[var(--app-text-muted)]" />
+                  )}
+                </div>
               </button>
             )
           })}
-        </div>
+        </AppCard>
+      </section>
+
+      <AppButton
+        type="button"
+        onClick={() => handleAction("logout")}
+        variant="danger"
+        size="lg"
+        className="w-full"
+      >
+        <LogOut className="h-[1.125rem] w-[1.125rem]" />
+        退出登录
+      </AppButton>
+
+      <div className="text-center">
+        <p className="text-sm text-[var(--app-text-secondary)]">途境漫语 AI 旅行助手</p>
+        <p className="mt-1 text-xs text-[var(--app-text-muted)]">版本 1.0.0</p>
       </div>
 
-      {/* Logout */}
-      <div className="px-6 py-6">
-        <button className="w-full py-4 bg-destructive/10 text-destructive rounded-xl font-medium hover:bg-destructive/20 transition-colors btn-press flex items-center justify-center gap-2">
-          <LogOut className="w-5 h-5" />
-          退出登录
-        </button>
-      </div>
-
-      {/* App Info */}
-      <div className="px-6 pb-6 text-center">
-        <p className="text-sm text-muted-foreground">途境漫语 AI旅游助手</p>
-        <p className="text-xs text-muted-foreground mt-1">版本 1.0.0</p>
-      </div>
-
-      {/* Favorites Modal */}
-      {showFavorites && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 animate-fade-in"
-          onClick={() => setShowFavorites(false)}
-        >
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-card rounded-t-3xl max-h-[80vh] overflow-hidden animate-slide-in-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 bg-card px-6 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-bold text-foreground">我的收藏</h2>
-              <button
-                onClick={() => setShowFavorites(false)}
-                className="p-2 rounded-full hover:bg-secondary transition-colors"
-              >
-                <span className="text-muted-foreground">关闭</span>
-              </button>
-            </div>
-            <div className="overflow-y-auto max-h-[calc(80vh-60px)] p-6">
-              {favoriteSpots.length === 0 ? (
-                <div className="text-center py-12">
-                  <Heart className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">还没有收藏任何地点</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {favoriteSpots.map((spot) => (
-                    <div
-                      key={spot.id}
-                      onClick={() => {
-                        setShowFavorites(false)
-                        onViewSpot(spot)
-                      }}
-                      className="flex items-center gap-4 p-3 bg-secondary/50 rounded-xl cursor-pointer hover:bg-secondary transition-colors"
-                    >
-                      <img
-                        src={spot.image}
-                        alt={spot.name}
-                        className="w-16 h-16 rounded-xl object-cover"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-foreground truncate">{spot.name}</h3>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
-                          <MapPin className="w-3 h-3" />
-                          <span className="truncate">{spot.address}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          toggleFavorite(spot.id)
-                        }}
-                        className="p-2"
-                      >
-                        <Heart className="w-5 h-5 fill-red-500 text-red-500" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+      <MobileSheet
+        open={activeSheet === "language"}
+        onClose={() => setActiveSheet(null)}
+        title="语言设置"
+        description="切换后会自动保存，下次打开继续保持。"
+      >
+        <div className="space-y-2">
+          {(Object.entries(LANGUAGE_LABELS) as Array<[AppLanguage, string]>).map(([code, label]) => (
+            <button
+              key={code}
+              type="button"
+              onClick={() => changeLanguage(code)}
+              className={cn(
+                "w-full rounded-[var(--app-radius-sm)] border px-3 py-3 text-left text-sm",
+                language === code
+                  ? "border-[var(--app-brand)] bg-[var(--app-brand-soft)] text-[var(--app-brand)]"
+                  : "border-[var(--app-line)] bg-[var(--app-surface)] text-[var(--app-text-primary)]"
               )}
-            </div>
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </MobileSheet>
+
+      <MobileSheet
+        open={activeSheet === "settings"}
+        onClose={() => setActiveSheet(null)}
+        title="账号设置"
+        description="集中管理语言、主题和通知。"
+      >
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setActiveSheet("language")}
+            className="flex w-full items-center justify-between rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 text-sm"
+          >
+            <span className="text-[var(--app-text-primary)]">语言设置</span>
+            <span className="text-[var(--app-text-secondary)]">{LANGUAGE_LABELS[language]}</span>
+          </button>
+          <button
+            type="button"
+            onClick={toggleDarkMode}
+            className="flex w-full items-center justify-between rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 text-sm"
+          >
+            <span className="text-[var(--app-text-primary)]">深色模式</span>
+            <span className="text-[var(--app-text-secondary)]">{isDarkMode ? "已开启" : "已关闭"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => openSubpage("notification")}
+            className="flex w-full items-center justify-between rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 text-sm"
+          >
+            <span className="text-[var(--app-text-primary)]">通知管理</span>
+            <ChevronRight className="h-4 w-4 text-[var(--app-text-muted)]" />
+          </button>
+          <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-xs text-[var(--app-text-secondary)]">
+            关于：途境漫语 v1.0.0
           </div>
+        </div>
+      </MobileSheet>
+
+      <ProfileSubpage
+        open={Boolean(activeSubpage)}
+        onClose={closeAllOverlays}
+        title={activeSubpage ? SUBPAGE_TITLE[activeSubpage] : ""}
+      >
+        {activeSubpage === "notification" && (
+          <div className="space-y-2">
+            {notifications.map((item) => (
+              <article
+                key={item.id}
+                className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-3"
+              >
+                <p className="text-sm text-[var(--app-text-primary)]">{item.title}</p>
+                <p className="mt-1 text-xs text-[var(--app-text-secondary)]">{item.time}</p>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {activeSubpage === "favorites" && (
+          <div className="space-y-3">
+            {favoriteSpots.length === 0 ? (
+              <EmptyStateCard
+                title="还没有收藏地点"
+                description="去探索页浏览目的地，收藏后会自动出现在这里。"
+                icon={Heart}
+              />
+            ) : (
+              favoriteSpots.map((spot) => (
+                <article
+                  key={spot.id}
+                  onClick={() => {
+                    closeAllOverlays()
+                    onViewSpot(spot)
+                  }}
+                  className="flex cursor-pointer items-center gap-3 rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-2.5"
+                >
+                  <img
+                    src={resolvePlaceImage({
+                      id: spot.id,
+                      name: spot.name,
+                      city: spot.city,
+                      province: spot.province,
+                      image: spot.image,
+                      coverImage: spot.image,
+                      type: spot.type,
+                    })}
+                    alt={spot.name}
+                    className="h-12 w-12 rounded-[0.7rem] object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
+                    <p className="truncate text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      toggleFavorite(spot.id)
+                      showFeedback(`已取消收藏：${spot.name}`)
+                    }}
+                    className="rounded-[0.65rem] p-1.5 text-[var(--app-error)] hover:bg-[color:rgba(183,91,80,0.1)]"
+                  >
+                    <Heart className="h-4 w-4 fill-current" />
+                  </button>
+                </article>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeSubpage === "calendar" && (
+          <CalendarPage plans={savedPlans} onGoPlanner={() => showFeedback("请前往 AI 规划页创建行程")} />
+        )}
+
+        {activeSubpage === "footprint" && (
+          <div className="space-y-3">
+            <article className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-3">
+              <p className="text-sm font-medium text-[var(--app-text-strong)]">足迹城市</p>
+              <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
+                {footprintCities.length > 0 ? footprintCities.join(" / ") : "暂无城市记录"}
+              </p>
+            </article>
+            {footprintSpots.length === 0 ? (
+              <article className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-6 text-center text-sm text-[var(--app-text-secondary)]">
+                暂无足迹记录，去探索页添加地点后会自动沉淀。
+              </article>
+            ) : (
+              footprintSpots.slice(0, 20).map((spot) => (
+                <article key={spot.id} className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-3">
+                  <p className="text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
+                  <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
+                    {spot.city || "未知城市"} · {spot.address || "暂无地址"}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+        )}
+
+        {(activeSubpage === "reviews" ||
+          activeSubpage === "privacy" ||
+          activeSubpage === "help" ||
+          activeSubpage === "contact") && (
+          <article className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+            <p className="text-sm leading-6 text-[var(--app-text-secondary)]">
+              {activeSubpage === "reviews" &&
+                "点评系统正在完善中，当前已保留入口并支持后续扩展。"}
+              {activeSubpage === "privacy" &&
+                "隐私设置将支持定位授权、个性化推荐开关与缓存清理，当前版本先保留入口。"}
+              {activeSubpage === "help" &&
+                "如遇问题可先通过“联系客服”反馈，我们会持续补充帮助中心内容。"}
+              {activeSubpage === "contact" &&
+                "客服通道正在接入中，当前版本可先记录问题，我们会在后续版本补齐。"}
+            </p>
+            <AppButton
+              type="button"
+              onClick={() => showFeedback("已收到反馈，后续版本将持续补齐")}
+              className="mt-3"
+              size="sm"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              了解并继续
+            </AppButton>
+          </article>
+        )}
+      </ProfileSubpage>
+
+      {feedback && (
+        <div className="fixed left-1/2 top-16 z-[70] -translate-x-1/2 rounded-[var(--app-radius-sm)] bg-[var(--app-text-strong)] px-4 py-2 text-sm text-white shadow-lg">
+          {feedback}
         </div>
       )}
     </div>

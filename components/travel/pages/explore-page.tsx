@@ -1,287 +1,336 @@
-"use client"
+﻿"use client"
 
-import { useState, useMemo } from "react"
-import { Search, Filter, MapPin, Star, Heart, SlidersHorizontal, X } from "lucide-react"
-import { useTravel, sampleSpots, Spot } from "@/lib/travel-context"
+import { useDeferredValue, useMemo, useState } from "react"
+import { ArrowDownUp, Search, SlidersHorizontal, X } from "lucide-react"
+import { AppButton } from "@/components/ui/app-button"
+import { AppCard } from "@/components/ui/app-card"
+import { AppChip } from "@/components/ui/app-chip"
+import { EmptyStateCard } from "@/components/ui/empty-state-card"
+import { AppInput } from "@/components/ui/app-input"
+import { AppPageHeader } from "@/components/ui/app-page-header"
+import { AppTag } from "@/components/ui/app-tag"
+import { VirtualizedPlaceList } from "@/components/travel/virtualized-place-list"
+import { useDebouncedValue } from "@/lib/planner-performance"
+import { Spot, sampleSpots, useTravel } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
 interface ExplorePageProps {
   onViewSpot: (spot: Spot) => void
 }
 
-const categories = [
-  { id: "all", label: "全部", emoji: "🌟" },
-  { id: "attraction", label: "景点", emoji: "🏛️" },
-  { id: "restaurant", label: "美食", emoji: "🍜" },
-  { id: "hotel", label: "住宿", emoji: "🏨" },
+type SpotCategory = "all" | "attraction" | "restaurant" | "hotel"
+type SortMode = "heat" | "rating" | "price-low" | "price-high"
+type ThemeTab = "recommended" | "domestic" | "asia" | "europe" | "nature" | "culture"
+
+const categories: Array<{ id: SpotCategory; label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "attraction", label: "景点" },
+  { id: "restaurant", label: "美食" },
+  { id: "hotel", label: "酒店" },
 ]
 
-const sortOptions = [
+const themeTabs: Array<{ id: ThemeTab; label: string }> = [
+  { id: "recommended", label: "推荐" },
+  { id: "domestic", label: "国内" },
+  { id: "asia", label: "亚洲" },
+  { id: "europe", label: "欧洲" },
+  { id: "nature", label: "自然" },
+  { id: "culture", label: "文化" },
+]
+
+const sortOptions: Array<{ id: SortMode; label: string }> = [
   { id: "heat", label: "热度优先" },
   { id: "rating", label: "评分优先" },
   { id: "price-low", label: "价格从低到高" },
   { id: "price-high", label: "价格从高到低" },
 ]
 
-export function ExplorePage({ onViewSpot }: ExplorePageProps) {
-  const { addSpot, selectedSpots, favorites, toggleFavorite, searchResults, isSearching, searchSpots } = useTravel()
-  const [searchQuery, setSearchQuery] = useState("")
-  const [activeCategory, setActiveCategory] = useState("all")
-  const [sortBy, setSortBy] = useState("heat")
-  const [showFilters, setShowFilters] = useState(false)
-  const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000])
+function normalizeKeyword(input: string) {
+  return input.trim().toLowerCase().replace(/\s+/g, "")
+}
 
-  // 处理搜索输入变化
-  const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value
-    setSearchQuery(query)
-    await searchSpots(query)
+function matchesKeyword(spot: Spot, keyword: string) {
+  if (!keyword) return true
+  const source = [
+    spot.name,
+    spot.address,
+    spot.city,
+    spot.province,
+    spot.district,
+    spot.tags.join(" "),
+    spot.description,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+  return source.includes(keyword)
+}
+
+function matchesTheme(spot: Spot, theme: ThemeTab) {
+  if (theme === "recommended" || theme === "domestic" || theme === "asia" || theme === "europe") {
+    return true
   }
+  const joined = `${spot.name} ${spot.description} ${spot.tags.join(" ")}`
+  if (theme === "nature") {
+    return /自然|公园|山|湖|森林|户外|风景|生态/u.test(joined)
+  }
+  if (theme === "culture") {
+    return /历史|文化|古迹|博物馆|艺术|人文|宫|寺/u.test(joined)
+  }
+  return true
+}
 
-  const isInTrip = (id: string) => selectedSpots.some((s) => s.id === id)
+export function ExplorePage({ onViewSpot }: ExplorePageProps) {
+  const { addSpot, selectedSpots, favorites, toggleFavorite } = useTravel()
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeCategory, setActiveCategory] = useState<SpotCategory>("all")
+  const [activeTheme, setActiveTheme] = useState<ThemeTab>("recommended")
+  const [sortBy, setSortBy] = useState<SortMode>("heat")
+  const [showFilters, setShowFilters] = useState(false)
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 2000])
+  const [activeCity, setActiveCity] = useState("all")
+
+  const debouncedQuery = useDebouncedValue(searchQuery, 220)
+  const keyword = useMemo(() => normalizeKeyword(debouncedQuery), [debouncedQuery])
+
+  const cityOptions = useMemo(() => {
+    const cityMap = new Map<string, number>()
+    for (const spot of sampleSpots) {
+      const city = spot.city?.trim()
+      if (!city) continue
+      cityMap.set(city, (cityMap.get(city) ?? 0) + 1)
+    }
+    return [...cityMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 16)
+      .map(([city]) => city)
+  }, [])
+
+  const categoryCounter = useMemo(() => {
+    return sampleSpots.reduce(
+      (acc, spot) => {
+        acc.all += 1
+        if (spot.type === "attraction") acc.attraction += 1
+        if (spot.type === "restaurant") acc.restaurant += 1
+        if (spot.type === "hotel") acc.hotel += 1
+        return acc
+      },
+      { all: 0, attraction: 0, restaurant: 0, hotel: 0 }
+    )
+  }, [])
+
+  const categorizedSpots = useMemo(() => {
+    let base = sampleSpots
+    if (activeCategory !== "all") {
+      base = base.filter((spot) => spot.type === activeCategory)
+    }
+    return base.filter((spot) => matchesTheme(spot, activeTheme))
+  }, [activeCategory, activeTheme])
 
   const filteredSpots = useMemo(() => {
-    let result = searchQuery ? [...searchResults] : [...sampleSpots]
+    let result = categorizedSpots
 
-    // 分类过滤
-    if (activeCategory !== "all") {
-      result = result.filter((spot) => spot.type === activeCategory)
+    if (activeCity !== "all") {
+      result = result.filter((spot) => (spot.city || "").trim() === activeCity)
     }
 
-    // 价格过滤
     result = result.filter(
       (spot) => spot.ticketPrice >= priceRange[0] && spot.ticketPrice <= priceRange[1]
     )
 
-    // 排序
-    switch (sortBy) {
-      case "heat":
-        result.sort((a, b) => b.heat - a.heat)
-        break
-      case "rating":
-        result.sort((a, b) => b.rating - a.rating)
-        break
-      case "price-low":
-        result.sort((a, b) => a.ticketPrice - b.ticketPrice)
-        break
-      case "price-high":
-        result.sort((a, b) => b.ticketPrice - a.ticketPrice)
-        break
+    if (keyword) {
+      result = result.filter((spot) => matchesKeyword(spot, keyword))
     }
 
-    return result
-  }, [searchQuery, activeCategory, sortBy, priceRange, searchResults, isSearching])
+    const sorted = [...result]
+    switch (sortBy) {
+      case "rating":
+        sorted.sort((a, b) => b.rating - a.rating)
+        break
+      case "price-low":
+        sorted.sort((a, b) => a.ticketPrice - b.ticketPrice)
+        break
+      case "price-high":
+        sorted.sort((a, b) => b.ticketPrice - a.ticketPrice)
+        break
+      default:
+        sorted.sort((a, b) => b.heat - a.heat)
+    }
+    return sorted
+  }, [activeCity, categorizedSpots, keyword, priceRange, sortBy])
+
+  const deferredSpots = useDeferredValue(filteredSpots)
+  const isInTrip = (id: string) => selectedSpots.some((spot) => spot.id === id)
 
   return (
-    <div className="min-h-screen pb-24 animate-fade-in">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border/50">
-        <div className="px-6 pt-12 pb-4">
-          <h1 className="text-2xl font-bold text-foreground mb-4">探索目的地</h1>
+    <div className="app-page animate-fade-in space-y-4">
+      <header className="space-y-3">
+        <AppPageHeader
+          title="发现目的地"
+          subtitle="挑选高质量候选地点，形成你的探索清单，再交给 AI 自动组装路线。"
+        />
 
-          {/* 搜索栏 */}
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="搜索景点、美食、住宿..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                className="w-full pl-12 pr-4 py-3.5 bg-secondary rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
-              />
-              {isSearching && (
-                <div className="absolute right-12 top-1/2 -translate-y-1/2 animate-spin">
-                  <Search className="w-4 h-4 text-muted-foreground" />
-                </div>
-              )}
-              {searchQuery && (
-                <button
-                  onClick={async () => {
-                    setSearchQuery("")
-                    await searchSpots("")
-                  }}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={cn(
-                "p-3.5 rounded-xl transition-all btn-press",
-                showFilters
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-foreground hover:bg-secondary/80"
-              )}
-            >
-              <SlidersHorizontal className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* 分类标签 */}
-        <div className="px-6 pb-4">
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-            {categories.map((cat) => (
+        <AppCard tone="elevated" padding="md" className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-[1.125rem] w-[1.125rem] -translate-y-1/2 text-[var(--app-text-muted)]" />
+            <AppInput
+              type="text"
+              density="lg"
+              tone="subtle"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索景点、美食、酒店、商圈"
+              className="pl-10 pr-9"
+            />
+            {searchQuery && (
               <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap transition-all btn-press",
-                  activeCategory === cat.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-foreground hover:bg-secondary/80"
-                )}
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-[var(--app-radius-xs)] p-1 text-[var(--app-text-muted)] hover:bg-[var(--app-surface-muted)]"
               >
-                <span>{cat.emoji}</span>
-                <span className="text-sm font-medium">{cat.label}</span>
+                <X className="h-4 w-4" />
               </button>
+            )}
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {themeTabs.map((item) => (
+              <AppChip
+                key={item.id}
+                type="button"
+                selected={activeTheme === item.id}
+                compact
+                onClick={() => setActiveTheme(item.id)}
+              >
+                {item.label}
+              </AppChip>
             ))}
           </div>
-        </div>
 
-        {/* 筛选面板 */}
-        {showFilters && (
-          <div className="px-6 pb-4 animate-slide-in-up">
-            <div className="bg-card rounded-xl p-4 border border-border/50 space-y-4">
-              {/* 排序 */}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {categories.map((item) => (
+                <AppChip
+                  key={item.id}
+                  type="button"
+                  selected={activeCategory === item.id}
+                  onClick={() => setActiveCategory(item.id)}
+                >
+                  {item.label}
+                  <span className="numeric ml-1 text-[10px] opacity-80">{categoryCounter[item.id]}</span>
+                </AppChip>
+              ))}
+            </div>
+            <AppButton
+              type="button"
+              variant={showFilters ? "primary" : "secondary"}
+              size="icon"
+              onClick={() => setShowFilters((prev) => !prev)}
+              aria-label="切换筛选"
+            >
+              <SlidersHorizontal className="h-[1.05rem] w-[1.05rem]" />
+            </AppButton>
+          </div>
+
+          {showFilters && (
+            <div className="space-y-3 rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface)] p-3">
               <div>
-                <label className="text-sm font-medium text-foreground mb-2 block">排序方式</label>
-                <div className="flex flex-wrap gap-2">
-                  {sortOptions.map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => setSortBy(opt.id)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-lg text-sm transition-all btn-press",
-                        sortBy === opt.id
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-foreground hover:bg-secondary/80"
-                      )}
+                <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--app-text-secondary)]">
+                  <ArrowDownUp className="h-3.5 w-3.5" />
+                  排序方式
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {sortOptions.map((item) => (
+                    <AppChip
+                      key={item.id}
+                      type="button"
+                      compact
+                      selected={sortBy === item.id}
+                      onClick={() => setSortBy(item.id)}
                     >
-                      {opt.label}
-                    </button>
+                      {item.label}
+                    </AppChip>
                   ))}
                 </div>
               </div>
 
-              {/* 价格范围 */}
               <div>
-                <label className="text-sm font-medium text-foreground mb-2 block">
-                  价格范围: ¥{priceRange[0]} - ¥{priceRange[1]}
-                </label>
+                <p className="mb-2 text-xs font-medium text-[var(--app-text-secondary)]">
+                  城市筛选 {activeCity !== "all" ? `· ${activeCity}` : ""}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  <AppChip type="button" compact selected={activeCity === "all"} onClick={() => setActiveCity("all")}>
+                    全部城市
+                  </AppChip>
+                  {cityOptions.map((city) => (
+                    <AppChip
+                      key={city}
+                      type="button"
+                      compact
+                      selected={activeCity === city}
+                      onClick={() => setActiveCity(city)}
+                    >
+                      {city}
+                    </AppChip>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="numeric mb-2 text-xs font-medium text-[var(--app-text-secondary)]">
+                  价格范围 ¥{priceRange[0]} - ¥{priceRange[1]}
+                </p>
                 <input
                   type="range"
-                  min="0"
-                  max="1000"
-                  step="50"
+                  min={0}
+                  max={4000}
+                  step={20}
                   value={priceRange[1]}
-                  onChange={(e) => setPriceRange([priceRange[0], parseInt(e.target.value)])}
-                  className="w-full accent-primary"
+                  onChange={(event) => setPriceRange([priceRange[0], Number(event.target.value)])}
+                  className="w-full accent-[var(--app-brand)]"
                 />
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </AppCard>
       </header>
 
-      {/* 结果统计 */}
-      <div className="px-6 py-3 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          共找到 <span className="font-semibold text-foreground">{filteredSpots.length}</span> 个结果
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-[var(--app-text-secondary)]">
+          共找到 <span className="numeric font-semibold text-[var(--app-text-strong)]">{filteredSpots.length}</span> 个候选
         </p>
+        {deferredSpots !== filteredSpots ? (
+          <span className="text-xs text-[var(--app-text-muted)]">列表更新中...</span>
+        ) : (
+          <AppTag tone="brand">{sortOptions.find((item) => item.id === sortBy)?.label}</AppTag>
+        )}
       </div>
 
-      {/* 景点列表 */}
-      <div className="px-6 space-y-4">
-        {filteredSpots.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">🔍</div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">未找到相关结果</h3>
-            <p className="text-muted-foreground">试试其他关键词或调整筛选条件</p>
-          </div>
+      <div className="pb-6">
+        {deferredSpots.length === 0 ? (
+          <EmptyStateCard
+            title="暂无匹配结果"
+            description="可以更换关键词、城市或价格区间再试。"
+            actionLabel="清空筛选"
+            onAction={() => {
+              setSearchQuery("")
+              setActiveCategory("all")
+              setActiveTheme("recommended")
+              setSortBy("heat")
+              setPriceRange([0, 2000])
+              setActiveCity("all")
+            }}
+          />
         ) : (
-          filteredSpots.map((spot, index) => (
-            <div
-              key={spot.id}
-              onClick={() => onViewSpot(spot)}
-              className="bg-card rounded-2xl overflow-hidden border border-border/50 card-hover cursor-pointer animate-slide-in-up"
-              style={{ animationDelay: `${index * 50}ms` }}
-            >
-              <div className="flex">
-                <div className="relative w-32 h-32 flex-shrink-0">
-                  <img
-                    src={spot.image}
-                    alt={spot.name}
-                    className="w-full h-full object-cover"
-                  />
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleFavorite(spot.id)
-                    }}
-                    className="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 flex items-center justify-center hover:bg-white transition-colors"
-                  >
-                    <Heart
-                      className={cn(
-                        "w-4 h-4",
-                        favorites.includes(spot.id)
-                          ? "fill-red-500 text-red-500"
-                          : "text-muted-foreground"
-                      )}
-                    />
-                  </button>
-                </div>
-                <div className="flex-1 p-4 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between mb-1">
-                      <h3 className="font-bold text-foreground text-lg leading-tight">{spot.name}</h3>
-                      <div className="flex items-center gap-1 ml-2">
-                        <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                        <span className="font-semibold text-foreground">{spot.rating}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 text-muted-foreground text-sm mb-2">
-                      <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">{spot.address}</span>
-                    </div>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {spot.tags.slice(0, 3).map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-2 py-0.5 bg-secondary text-xs font-medium text-foreground rounded-md"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between mt-3">
-                    <span className="text-primary font-bold">
-                      {spot.ticketPrice === 0 ? "免费" : `¥${spot.ticketPrice}`}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        addSpot(spot)
-                      }}
-                      disabled={isInTrip(spot.id)}
-                      className={cn(
-                        "px-4 py-1.5 rounded-lg text-sm font-medium transition-all btn-press",
-                        isInTrip(spot.id)
-                          ? "bg-muted text-muted-foreground cursor-default"
-                          : "bg-primary text-primary-foreground hover:bg-primary/90"
-                      )}
-                    >
-                      {isInTrip(spot.id) ? "已添加" : "加入行程"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))
+          <VirtualizedPlaceList
+            items={deferredSpots}
+            favorites={favorites}
+            isInTrip={isInTrip}
+            onToggleFavorite={toggleFavorite}
+            onViewSpot={onViewSpot}
+            onAddSpot={addSpot}
+          />
         )}
       </div>
     </div>
