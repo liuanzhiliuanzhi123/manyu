@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿"use client"
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿"use client"
 
 import {
   createContext,
@@ -24,6 +24,7 @@ import type {
   TransportSuggestionMode,
   TravelRequirement,
 } from "@/lib/planner-types"
+import type { DayWeather, WeatherSummary } from "@/lib/weather-types"
 import {
   loadCurrentPlanIdFromStorage,
   loadSavedPlansFromStorage,
@@ -135,6 +136,9 @@ export interface ItineraryDay {
   hotelSuggestion?: DaySuggestionItem | null
   totalMealCost?: number
   totalHotelCost?: number
+  weather?: DayWeather
+  weatherAdvice?: string
+  weatherTags?: string[]
 }
 
 export type PlanGenerationStatus = "success" | "partial" | "error"
@@ -155,6 +159,7 @@ export interface TripPlan {
   totalTravelSeconds?: number
   totalPlayMinutes?: number
   totalEstimatedCost?: number
+  weatherSummary?: WeatherSummary
   generationStatus?: PlanGenerationStatus
   generationNotices?: string[]
   requirement?: TravelRequirement

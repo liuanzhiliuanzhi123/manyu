@@ -1,6 +1,6 @@
 "use client"
 
-import { CircleUser, Compass, Home, MapPinned, Sparkles } from "lucide-react"
+import { CircleUser, Compass, Home, MapPinned, WandSparkles } from "lucide-react"
 import { AppBottomTabBar } from "@/components/ui/app-bottom-tab-bar"
 import { AppTabbar } from "@/components/ui/app-tabbar"
 import { travelDesignTokens } from "@/lib/design-tokens"
@@ -16,7 +16,7 @@ interface BottomNavProps {
 const tabs = [
   { id: "home" as TabType, label: "首页", icon: Home },
   { id: "explore" as TabType, label: "探索", icon: Compass },
-  { id: "ai" as TabType, label: "AI规划", icon: Sparkles, highlight: true },
+  { id: "ai" as TabType, label: "AI规划", icon: WandSparkles, highlight: true },
   { id: "trips" as TabType, label: "行程", icon: MapPinned },
   { id: "profile" as TabType, label: "我的", icon: CircleUser },
 ]

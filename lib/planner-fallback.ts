@@ -66,6 +66,32 @@ function containsAny(text: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(text))
 }
 
+function getWeatherRuleText(request: PlannerDecisionRequest) {
+  const advice = request.weatherContext?.summary.travelAdvice
+  const dayAdvice = request.weatherContext?.dayWeather
+    .flatMap((item) => [item.weather, item.advice, ...item.tags, ...item.suggestions])
+    .join(" ")
+  return [
+    advice?.summary,
+    ...(advice?.tags || []),
+    ...(advice?.suggestions || []),
+    ...(advice?.itineraryRules || []),
+    dayAdvice,
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+function isIndoorCandidate(candidate: PlannerCandidate) {
+  const text = `${candidate.name} ${(candidate.tags || []).join(" ")} ${candidate.address || ""}`
+  return /博物馆|美术馆|展馆|展览|商场|购物|剧院|演出|书店|室内|餐厅|文化中心|艺术/u.test(text)
+}
+
+function isExposedCandidate(candidate: PlannerCandidate) {
+  const text = `${candidate.name} ${(candidate.tags || []).join(" ")} ${candidate.address || ""}`
+  return /公园|山|湖|河|海|峡谷|草原|徒步|登高|露天|广场|城墙|长城|观景|自然|户外/u.test(text)
+}
+
 function scoreAttraction(
   candidate: PlannerCandidate,
   request: PlannerDecisionRequest,
@@ -107,6 +133,27 @@ function scoreAttraction(
 
   if (request.pace === "fast") score += 6
   if (request.pace === "slow" && isRemoteDistrict(candidate.district)) score -= 10
+
+  const weatherText = getWeatherRuleText(request)
+  if (weatherText) {
+    const indoor = isIndoorCandidate(candidate)
+    const exposed = isExposedCandidate(candidate)
+    if (/雨|雷阵雨|雨雪|室内优先/u.test(weatherText)) {
+      if (indoor) score += 20
+      if (exposed) score -= 22
+    }
+    if (/高温|避晒|12:00-15:00/u.test(weatherText)) {
+      if (indoor) score += 10
+      if (exposed) score -= 14
+    }
+    if (/大风|沙尘|开阔|登高|湖边/u.test(weatherText)) {
+      if (indoor) score += 8
+      if (exposed) score -= 16
+    }
+    if (/晴|适合户外/u.test(weatherText) && exposed) {
+      score += 8
+    }
+  }
 
   return score
 }
@@ -211,7 +258,9 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
   const warnings: string[] = []
   const budgetUpper = parseBudgetUpperBound(request.budgetRange)
   const preferredSet = new Set(request.manualPreferredPlaceIds || [])
-  const perDayLimit = paceSpotLimit(request.pace)
+  const weatherText = getWeatherRuleText(request)
+  const weatherNeedsBuffer = /雨|雷阵雨|雨雪|高温|大风|沙尘|天气暂不可用/u.test(weatherText)
+  const perDayLimit = Math.max(2, paceSpotLimit(request.pace) - (weatherNeedsBuffer ? 1 : 0))
   const maxAttractions = Math.max(request.totalDays * perDayLimit, request.totalDays * 2)
 
   const rankedAttractions = [...request.attractions]
@@ -229,6 +278,7 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
   const dayBuckets = pickDayBuckets(rankedAttractions, request.totalDays, perDayLimit)
   const usedSpotIds = new Set<string>()
   const days: GeneratedPlanDay[] = dayBuckets.map((bucket, index) => {
+    const dayWeather = request.weatherContext?.dayWeather[index]
     bucket.forEach((spot) => usedSpotIds.add(spot.placeId))
     const anchor = bucket[bucket.length - 1] || bucket[0]
 
@@ -261,11 +311,15 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
     if (bucket.length === 0) dayWarnings.push("当天景点候选不足，建议手动补充。")
     if (!lunch || !dinner) dayWarnings.push("当天餐饮候选不足，已尽量就近补齐。")
     if (!hotel) dayWarnings.push("当天酒店候选不足，建议手动确认住宿。")
+    if (dayWeather?.advice) dayWarnings.push(`天气提醒：${dayWeather.advice}`)
 
     return {
       day: index + 1,
-      theme: makeDayTheme(request.pace),
+      theme: dayWeather?.riskLevel === "high" ? "天气友好慢行日" : makeDayTheme(request.pace),
       districtSummary: districtSummary || undefined,
+      weather: dayWeather,
+      weatherAdvice: dayWeather?.advice,
+      weatherTags: dayWeather?.tags,
       spots: bucket.map((spot) => ({
         placeId: spot.placeId,
         stayMinutes: spot.stayMinutes,
@@ -323,6 +377,7 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
       destination: request.destination,
       totalDays: request.totalDays,
       totalBudget: Number.isFinite(budgetUpper) ? budgetUpper : undefined,
+      weatherSummary: request.weatherContext?.summary,
       days,
       droppedPlaceIds,
       explanations,

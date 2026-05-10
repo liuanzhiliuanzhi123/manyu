@@ -11,10 +11,10 @@ import {
   Star,
   X,
 } from "lucide-react"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { AppButton } from "@/components/ui/app-button"
 import { AppCard } from "@/components/ui/app-card"
 import { AppTag } from "@/components/ui/app-tag"
-import { resolvePlaceImage } from "@/lib/place-image"
 import { useTravel, type Spot } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 import type { NavigateToSpotResult } from "@/lib/navigation"
@@ -92,24 +92,13 @@ export function SpotDetailSheet({
           </button>
 
           <div className="relative h-56">
-            <img
-              src={resolvePlaceImage({
-                id: spot.id,
-                name: spot.name,
-                city: spot.city,
-                province: spot.province,
-                image: spot.image,
-                coverImage: spot.image,
-              })}
+            <PlacePhotoImage
+              name={spot.name}
+              city={spot.city}
+              province={spot.province}
+              type={spot.type}
               alt={spot.name}
               className="h-full w-full object-cover"
-              onError={(event) => {
-                event.currentTarget.src = resolvePlaceImage({
-                  city: spot.city,
-                  province: spot.province,
-                  name: spot.name,
-                })
-              }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
 

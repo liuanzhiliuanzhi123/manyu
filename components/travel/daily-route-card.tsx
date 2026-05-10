@@ -3,19 +3,22 @@
 import {
   ArrowDown,
   ArrowUp,
+  CloudSun,
   Clock3,
   Lock,
   LockOpen,
   RefreshCcw,
   Tag,
   Timer,
+  Umbrella,
   Wallet,
+  Wind,
 } from "lucide-react"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { RouteLegCard } from "@/components/travel/route-leg-card"
 import { ResultLifestyleCard } from "@/components/travel/result-lifestyle-card"
 import { AppButton } from "@/components/ui/app-button"
 import { AppTag } from "@/components/ui/app-tag"
-import { resolvePlaceImage } from "@/lib/place-image"
 import { getDayHeadline, getDayLabel } from "@/lib/result-layout"
 import type { ItineraryDay, RouteTransportMode } from "@/lib/travel-context"
 
@@ -60,6 +63,12 @@ export function DailyRouteCard({
 }: DailyRouteCardProps) {
   const routeLegs = routeLegsOverride ?? day.routeLegs
   const lockedSet = new Set(lockedSpotIds)
+  const weatherSuggestions =
+    day.weather?.suggestions && day.weather.suggestions.length > 0
+      ? day.weather.suggestions
+      : day.weatherAdvice
+      ? [day.weatherAdvice]
+      : []
 
   return (
     <section className="space-y-4">
@@ -81,6 +90,37 @@ export function DailyRouteCard({
               <RefreshCcw className="h-3.5 w-3.5" />
               重新优化当日
             </AppButton>
+          </div>
+        </section>
+      )}
+
+      {day.weather && (
+        <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--app-radius-sm)] bg-[var(--app-brand-soft)] text-[var(--app-brand)]">
+              <CloudSun className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">天气与出行提醒</h4>
+              <p className="mt-1 text-xs leading-5 text-[var(--app-text-secondary)]">
+                {day.weather.weather} {day.weather.temperatureText}
+                {day.weather.windText ? `｜${day.weather.windText}` : ""}｜{day.weatherAdvice || day.weather.advice}
+              </p>
+              {weatherSuggestions.length > 0 && (
+                <div className="mt-3 grid gap-2 text-xs text-[var(--app-text-secondary)]">
+                  {weatherSuggestions.slice(0, 3).map((suggestion, index) => (
+                    <p key={`${day.day}-weather-${index}`} className="flex items-start gap-2 rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 leading-5">
+                      {index === 0 ? (
+                        <Umbrella className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--app-brand)]" />
+                      ) : (
+                        <Wind className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--app-brand)]" />
+                      )}
+                      <span>{suggestion}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -122,20 +162,13 @@ export function DailyRouteCard({
                   <div className="numeric mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-xs font-semibold text-[var(--app-brand)]">
                     {index + 1}
                   </div>
-                  <img
-                    src={resolvePlaceImage({
-                      id: spot.id,
-                      name: spot.name,
-                      city: spot.city,
-                      province: spot.province,
-                      image: spot.image,
-                      coverImage: spot.image,
-                    })}
+                  <PlacePhotoImage
+                    name={spot.name}
+                    city={spot.city}
+                    province={spot.province}
+                    type={spot.type}
                     alt={spot.name}
                     className="h-14 w-14 rounded-[0.8rem] object-cover"
-                    onError={(event) => {
-                      event.currentTarget.src = resolvePlaceImage({ city: spot.city, province: spot.province, name: spot.name })
-                    }}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[var(--app-text-strong)]">{spot.name}</p>
@@ -257,9 +290,9 @@ export function DailyRouteCard({
 
       <section className="rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-4">
         <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">吃住安排</h4>
-        <p className="mt-1 text-xs text-[var(--app-text-secondary)]">与当日路线自然衔接的生活方式建议。</p>
+        <p className="mt-1 text-xs text-[var(--app-text-secondary)]">顺着当天路线安排午餐、晚餐与住宿。</p>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
+        <div className="mt-3 space-y-2.5">
           <ResultLifestyleCard
             title="午餐建议"
             item={day.lunchSuggestion}

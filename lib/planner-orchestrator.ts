@@ -3,6 +3,7 @@
 import { hasDashscopeApiKey } from "@/lib/aliyun-qwen-client"
 import { generatePlanByQwen } from "@/lib/llm-planner"
 import { buildFallbackGeneratedPlan } from "@/lib/planner-fallback"
+import { buildWeatherPlanContext, getWeatherByCity } from "@/lib/weather-service"
 import {
   plannerDecisionRequestSchema,
   plannerDecisionResultSchema,
@@ -45,6 +46,32 @@ function isRemoteDistrict(district?: string) {
   const text = normalizeText(district)
   if (!text) return false
   return REMOTE_DISTRICT_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function getWeatherRuleText(input: PlannerDecisionRequestInput) {
+  const advice = input.weatherContext?.summary.travelAdvice
+  const dayAdvice = input.weatherContext?.dayWeather
+    .flatMap((item) => [item.weather, item.advice, ...item.tags, ...item.suggestions])
+    .join(" ")
+  return [
+    advice?.summary,
+    ...(advice?.tags || []),
+    ...(advice?.suggestions || []),
+    ...(advice?.itineraryRules || []),
+    dayAdvice,
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+function isIndoorCandidate(item: PlannerDecisionRequestInput["attractions"][number]) {
+  const text = `${item.name} ${(item.tags || []).join(" ")} ${item.address || ""}`
+  return /博物馆|美术馆|展馆|展览|商场|购物|剧院|演出|书店|室内|餐厅|文化中心|艺术/u.test(text)
+}
+
+function isExposedCandidate(item: PlannerDecisionRequestInput["attractions"][number]) {
+  const text = `${item.name} ${(item.tags || []).join(" ")} ${item.address || ""}`
+  return /公园|山|湖|河|海|峡谷|草原|徒步|登高|露天|广场|城墙|长城|观景|自然|户外/u.test(text)
 }
 
 function distanceMeters(
@@ -101,6 +128,27 @@ function scoreAttraction(
 
   if (input.pace === "fast") score += 6
   if (input.pace === "slow" && isRemoteDistrict(item.district)) score -= 6
+
+  const weatherText = getWeatherRuleText(input)
+  if (weatherText) {
+    const indoor = isIndoorCandidate(item)
+    const exposed = isExposedCandidate(item)
+    if (/雨|雷阵雨|雨雪|室内优先/u.test(weatherText)) {
+      if (indoor) score += 18
+      if (exposed) score -= 18
+    }
+    if (/高温|避晒|12:00-15:00/u.test(weatherText)) {
+      if (indoor) score += 10
+      if (exposed) score -= 12
+    }
+    if (/大风|沙尘|开阔|登高|湖边/u.test(weatherText)) {
+      if (indoor) score += 8
+      if (exposed) score -= 14
+    }
+    if (/晴|适合户外/u.test(weatherText) && exposed) {
+      score += 8
+    }
+  }
 
   return score
 }
@@ -239,12 +287,22 @@ export async function runPlannerDecision(
   payload: unknown
 ): Promise<PlannerDecisionResultOutput> {
   const parsed = plannerDecisionRequestSchema.parse(payload)
-
-  if (!isBeijingInput(parsed)) {
-    return buildFallbackDecision(parsed, ["第三阶段当前仅支持北京，已降级为规则方案。"])
+  const weatherSummary = await getWeatherByCity(parsed.city || parsed.destination)
+  const parsedWithWeather: PlannerDecisionRequestInput = {
+    ...parsed,
+    weatherContext: buildWeatherPlanContext(weatherSummary, parsed.totalDays, parsed.startDate),
   }
 
-  const prepared = applyHardRules(parsed)
+  if (!isBeijingInput(parsedWithWeather)) {
+    return buildFallbackDecision(parsedWithWeather, ["第三阶段当前仅支持北京，已降级为规则方案。"])
+  }
+
+  const prepared = applyHardRules(parsedWithWeather)
+  if (weatherSummary.source === "fallback") {
+    prepared.warnings.unshift("天气数据暂不可用，本方案按常规出行条件生成。")
+  } else {
+    prepared.warnings.unshift(`已接入${weatherSummary.city}天气：${weatherSummary.travelAdvice.summary}`)
+  }
 
   if (prepared.input.attractions.length === 0) {
     return buildFallbackDecision(prepared.input, [...prepared.warnings, "可用景点候选不足，已使用规则兜底。"])

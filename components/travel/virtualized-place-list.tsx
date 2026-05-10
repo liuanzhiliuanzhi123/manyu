@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Heart, MapPin, Star } from "lucide-react"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { AppButton } from "@/components/ui/app-button"
 import { AppTag } from "@/components/ui/app-tag"
 import type { Spot } from "@/lib/travel-context"
 import { paginateItems } from "@/lib/planner-performance"
-import { resolvePlaceImage } from "@/lib/place-image"
 import { cn } from "@/lib/utils"
 
 interface VirtualizedPlaceListProps {
@@ -23,50 +23,21 @@ const DEFAULT_PAGE_SIZE = 18
 
 function SpotImage({ spot }: { spot: Spot }) {
   const [loaded, setLoaded] = useState(false)
-  const [imageSrc, setImageSrc] = useState(() =>
-    resolvePlaceImage({
-      id: spot.id,
-      name: spot.name,
-      city: spot.city,
-      province: spot.province,
-      image: spot.image,
-      coverImage: spot.image,
-    })
-  )
 
   useEffect(() => {
-    setImageSrc(
-      resolvePlaceImage({
-        id: spot.id,
-        name: spot.name,
-        city: spot.city,
-        province: spot.province,
-        image: spot.image,
-        coverImage: spot.image,
-      })
-    )
     setLoaded(false)
-  }, [spot])
+  }, [spot.id])
 
   return (
     <div className="relative h-44 w-full overflow-hidden rounded-[var(--app-radius-lg)] bg-[var(--app-surface-muted)]">
       {!loaded && <div className="absolute inset-0 animate-pulse bg-[var(--app-surface-muted)]" />}
-      <img
-        src={imageSrc}
+      <PlacePhotoImage
+        name={spot.name}
+        city={spot.city}
+        province={spot.province}
+        type={spot.type}
         alt={spot.name}
-        loading="lazy"
-        decoding="async"
         onLoad={() => setLoaded(true)}
-        onError={() => {
-          setImageSrc(
-            resolvePlaceImage({
-              city: spot.city,
-              province: spot.province,
-              name: spot.name,
-            })
-          )
-          setLoaded(true)
-        }}
         className={cn(
           "h-full w-full object-cover transition-opacity duration-300",
           loaded ? "opacity-100" : "opacity-0"

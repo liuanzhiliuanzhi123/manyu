@@ -25,23 +25,39 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
     destination: input.destination,
     city: input.city,
     province: input.province,
+    startDate: input.startDate || "",
+    endDate: input.endDate || "",
     totalDays: input.totalDays,
     budgetRange: input.budgetRange,
     companions: input.companions,
     pace: input.pace,
     interests: summarizeInterests(input.interests),
     specialNeeds: summarizeSpecialNeeds(input.specialNeeds),
+    weatherContext: input.weatherContext
+      ? {
+          city: input.weatherContext.summary.city,
+          source: input.weatherContext.summary.source,
+          live: input.weatherContext.summary.live,
+          forecastByDay: input.weatherContext.dayWeather,
+          travelWeatherAdvice: input.weatherContext.summary.travelAdvice,
+          itineraryRules: input.weatherContext.summary.travelAdvice.itineraryRules,
+        }
+      : null,
   }
 
   const outputContract = {
     destination: "string",
     totalDays: "number",
     totalBudget: "number(optional)",
+    weatherSummary: "object(optional, copy weatherContext.summary when available)",
     days: [
       {
         day: "number(1-based)",
         theme: "string",
         districtSummary: "string(optional)",
+        weather: "object(optional, copy corresponding forecastByDay item when available)",
+        weatherAdvice: "string(optional, one concise weather response sentence)",
+        weatherTags: ["string(optional)"],
         spots: [
           {
             placeId: "string(candidate attraction id only)",
@@ -84,6 +100,15 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
       keepNearbyFoodHotelLogic: true,
       provideExplanations: true,
       preserveManualPreferredPlacesWhenReasonable: true,
+      mustConsiderWeather: true,
+      weatherRules: [
+        "Rain or thunderstorms: prefer museums, indoor exhibitions, shopping areas, restaurants; reduce parks, viewpoints, long walks; add transport buffer.",
+        "Sunny weather: outdoor sights, city walks, parks and viewpoints can be prioritized, with sunscreen and hydration reminders.",
+        "High temperature: reduce outdoor exposure from 12:00-15:00 and place restaurants, malls, museums or hotel rest in the middle of the day.",
+        "Low temperature or snow: slow down the route, reduce early/late outdoor time, mention warmth and anti-slip.",
+        "Strong wind or dust: reduce elevated, lakeside and open-area stops; prefer indoor and short-distance routing.",
+        "If weather data is unavailable, keep the plan usable under normal travel conditions and state that weather is unavailable.",
+      ],
     },
     candidates: {
       attractions: input.attractions,

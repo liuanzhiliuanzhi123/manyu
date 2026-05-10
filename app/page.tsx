@@ -48,7 +48,7 @@ function TravelApp() {
   }
 
   const handleNavigate = (
-    tab: "explore" | "trips" | "ai",
+    tab: "explore" | "trips" | "ai" | "profile",
     options?: NavigateOptions
   ) => {
     if (tab === "ai") {
@@ -85,9 +85,7 @@ function TravelApp() {
   return (
     <div className="app-shell relative mx-auto min-h-screen max-w-[430px] overflow-hidden md:my-4 md:rounded-[32px]">
       <main className="min-h-screen">
-        {activeTab === "home" && (
-          <HomePage onNavigate={handleNavigate} onViewSpot={handleViewSpot} />
-        )}
+        {activeTab === "home" && <HomePage onNavigate={handleNavigate} />}
         {activeTab === "explore" && (
           <ExplorePage onViewSpot={handleViewSpot} />
         )}
@@ -107,7 +105,11 @@ function TravelApp() {
           />
         )}
         {activeTab === "profile" && (
-          <ProfilePage onViewSpot={handleViewSpot} onOpenSavedPlan={handleOpenSavedPlan} />
+          <ProfilePage
+            onViewSpot={handleViewSpot}
+            onOpenSavedPlan={handleOpenSavedPlan}
+            onGoPlanner={() => handleNavigate("ai")}
+          />
         )}
       </main>
 

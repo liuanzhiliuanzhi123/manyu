@@ -1,9 +1,9 @@
 // Coze API 服务
 
-const BOT_ID = "7627053462115057690";
-const TOKEN = "pat_XeBG3YPWvCS3RwfF3fjhxyFECjlPdNxVeF0C0roUhk5luuHHHlgqFDqigql6jO5D";
-const USER_ID = "2314942472781916";
-const COZE_API_URL = "https://api.coze.cn/v3/chat";
+const BOT_ID = process.env.COZE_BOT_ID?.trim() || "";
+const TOKEN = process.env.COZE_API_TOKEN?.trim() || "";
+const USER_ID = process.env.COZE_USER_ID?.trim() || "";
+const COZE_API_URL = process.env.COZE_API_URL?.trim() || "https://api.coze.cn/v3/chat";
 
 export interface CozeResponse {
   id: string;
@@ -76,6 +76,15 @@ export async function searchCozeDatabase(query: string): Promise<any[]> {
     console.log("开始搜索 Coze 数据库:", query);
     console.log("使用的 API 地址:", COZE_API_URL);
     
+    if (!BOT_ID || !TOKEN || !USER_ID) {
+      console.warn("Coze API config is missing. Falling back to mock spots.");
+      return mockSpots.filter(spot =>
+        spot.name.toLowerCase().includes(query.toLowerCase()) ||
+        spot.address.toLowerCase().includes(query.toLowerCase()) ||
+        spot.tags.some(tag => tag.toLowerCase().includes(query.toLowerCase()))
+      );
+    }
+
     const response = await fetch(COZE_API_URL, {
       method: "POST",
       headers: {

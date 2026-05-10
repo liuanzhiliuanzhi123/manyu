@@ -28,10 +28,10 @@ import { AppStatCard } from "@/components/ui/app-stat-card"
 import { AppTag } from "@/components/ui/app-tag"
 import { CalendarPage } from "@/components/travel/calendar-page"
 import { MobileSheet } from "@/components/travel/mobile-sheet"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { ProfileSubpage } from "@/components/travel/profile-subpage"
 import { SavedPlanCard } from "@/components/travel/saved-plan-card"
 import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
-import { resolvePlaceImage } from "@/lib/place-image"
 import {
   AppLanguage,
   getStoredLanguage,
@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils"
 interface ProfilePageProps {
   onViewSpot: (spot: Spot) => void
   onOpenSavedPlan: (planId: string) => void
+  onGoPlanner: () => void
 }
 
 type ActionId =
@@ -99,7 +100,7 @@ const SUBPAGE_TITLE: Record<Exclude<ActiveSubpage, null>, string> = {
   footprint: "旅行足迹",
 }
 
-export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
+export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: ProfilePageProps) {
   const { favorites, savedPlans, selectedSpots, toggleFavorite, deletePlan } = useTravel()
   const { theme, resolvedTheme, setTheme } = useTheme()
 
@@ -126,7 +127,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
         title:
           savedPlans.length > 0
             ? `你已保存 ${savedPlans.length} 个行程方案，可继续优化路线。`
-            : "欢迎使用途境漫语，先去探索页添加地点吧。",
+            : "欢迎使用拾景拼途，先去探索页添加地点吧。",
         time: "刚刚",
       },
       {
@@ -266,32 +267,6 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
         </div>
       </AppCard>
 
-      <AppCard tone="elevated" padding="md" className="hero-scenic-bg relative overflow-hidden text-white">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(20,28,14,0.08)_0%,rgba(20,28,14,0.36)_100%)]" />
-        <div className="relative flex items-start justify-between gap-3">
-          <div>
-            <p className="app-label text-white/80">MEMBER PRIVILEGE</p>
-            <h2 className="mt-1 text-lg font-semibold">探索会员 · Green Voyager</h2>
-            <p className="mt-1 text-xs text-white/85">专享 AI 规划优先队列、出行模板和年度路线报告。</p>
-          </div>
-          <AppTag className="border-white/25 bg-white/16 text-white">Lv.2</AppTag>
-        </div>
-        <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
-            <p className="numeric text-sm font-semibold">12</p>
-            <p className="text-[10px] text-white/85">可用模板</p>
-          </div>
-          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
-            <p className="numeric text-sm font-semibold">4</p>
-            <p className="text-[10px] text-white/85">专属权益</p>
-          </div>
-          <div className="rounded-[var(--app-radius-sm)] bg-white/14 px-2 py-2">
-            <p className="numeric text-sm font-semibold">2026</p>
-            <p className="text-[10px] text-white/85">有效至</p>
-          </div>
-        </div>
-      </AppCard>
-
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="app-section-title">旅行偏好与记录</h2>
@@ -348,13 +323,15 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-        <h2 className="app-section-title">已保存方案</h2>
-        <span className="numeric text-xs text-[var(--app-text-secondary)]">{savedPlans.length} 个</span>
-      </div>
+          <h2 className="app-section-title">已保存方案</h2>
+          <span className="numeric text-xs text-[var(--app-text-secondary)]">{savedPlans.length} 个</span>
+        </div>
         {savedPlans.length === 0 ? (
           <EmptyStateCard
-            title="暂无已保存方案"
-            description="去 AI 规划页生成并保存第一份旅行方案。"
+            title="还没有保存的旅行方案"
+            description="先用 AI 生成一份专属行程吧"
+            actionLabel="去 AI 规划"
+            onAction={onGoPlanner}
             icon={CalendarDays}
           />
         ) : (
@@ -438,7 +415,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
       </AppButton>
 
       <div className="text-center">
-        <p className="text-sm text-[var(--app-text-secondary)]">途境漫语 AI 旅行助手</p>
+        <p className="text-sm text-[var(--app-text-secondary)]">拾景拼途 AI 旅行助手</p>
         <p className="mt-1 text-xs text-[var(--app-text-muted)]">版本 1.0.0</p>
       </div>
 
@@ -499,7 +476,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
             <ChevronRight className="h-4 w-4 text-[var(--app-text-muted)]" />
           </button>
           <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-xs text-[var(--app-text-secondary)]">
-            关于：途境漫语 v1.0.0
+            关于：拾景拼途 v1.0.0
           </div>
         </div>
       </MobileSheet>
@@ -541,16 +518,11 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan }: ProfilePageProps) {
                   }}
                   className="flex cursor-pointer items-center gap-3 rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-2.5"
                 >
-                  <img
-                    src={resolvePlaceImage({
-                      id: spot.id,
-                      name: spot.name,
-                      city: spot.city,
-                      province: spot.province,
-                      image: spot.image,
-                      coverImage: spot.image,
-                      type: spot.type,
-                    })}
+                  <PlacePhotoImage
+                    name={spot.name}
+                    city={spot.city}
+                    province={spot.province}
+                    type={spot.type}
                     alt={spot.name}
                     className="h-12 w-12 rounded-[0.7rem] object-cover"
                   />

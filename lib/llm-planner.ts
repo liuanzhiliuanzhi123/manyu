@@ -161,10 +161,14 @@ function sanitizePlanAgainstCandidates(
         ? sourceDay.hotel
         : (warnings.push(`Removed unknown hotel placeId: ${sourceDay.hotel.placeId}`), undefined)
       : sourceDay.hotel
+    const dayWeather = sourceDay.weather || input.weatherContext?.dayWeather[dayNumber - 1]
 
     return {
       ...sourceDay,
       day: dayNumber,
+      weather: dayWeather,
+      weatherAdvice: sourceDay.weatherAdvice || dayWeather?.advice,
+      weatherTags: sourceDay.weatherTags || dayWeather?.tags,
       spots,
       lunch,
       dinner,
@@ -179,6 +183,7 @@ function sanitizePlanAgainstCandidates(
       ...plan,
       destination: input.destination,
       totalDays: input.totalDays,
+      weatherSummary: plan.weatherSummary || input.weatherContext?.summary,
       days,
       droppedPlaceIds,
     },

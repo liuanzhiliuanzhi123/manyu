@@ -1,18 +1,17 @@
 ﻿"use client"
 
 import { useDeferredValue, useMemo, useState } from "react"
-import { ArrowDownUp, Search, SlidersHorizontal, X } from "lucide-react"
+import { ArrowDownUp, Compass, Search, SlidersHorizontal, X } from "lucide-react"
 import { AppButton } from "@/components/ui/app-button"
 import { AppCard } from "@/components/ui/app-card"
 import { AppChip } from "@/components/ui/app-chip"
-import { EmptyStateCard } from "@/components/ui/empty-state-card"
 import { AppInput } from "@/components/ui/app-input"
 import { AppPageHeader } from "@/components/ui/app-page-header"
 import { AppTag } from "@/components/ui/app-tag"
 import { VirtualizedPlaceList } from "@/components/travel/virtualized-place-list"
+import { getPlaceRegion } from "@/lib/place-region"
 import { useDebouncedValue } from "@/lib/planner-performance"
 import { Spot, sampleSpots, useTravel } from "@/lib/travel-context"
-import { cn } from "@/lib/utils"
 
 interface ExplorePageProps {
   onViewSpot: (spot: Spot) => void
@@ -68,8 +67,17 @@ function matchesKeyword(spot: Spot, keyword: string) {
 }
 
 function matchesTheme(spot: Spot, theme: ThemeTab) {
-  if (theme === "recommended" || theme === "domestic" || theme === "asia" || theme === "europe") {
+  if (theme === "recommended") {
     return true
+  }
+  if (theme === "domestic") {
+    return getPlaceRegion(spot) === "domestic"
+  }
+  if (theme === "asia") {
+    return getPlaceRegion(spot) === "asia"
+  }
+  if (theme === "europe") {
+    return getPlaceRegion(spot) === "europe"
   }
   const joined = `${spot.name} ${spot.description} ${spot.tags.join(" ")}`
   if (theme === "nature") {
@@ -79,6 +87,28 @@ function matchesTheme(spot: Spot, theme: ThemeTab) {
     return /历史|文化|古迹|博物馆|艺术|人文|宫|寺/u.test(joined)
   }
   return true
+}
+
+function getEmptyStateDescription(theme: ThemeTab, category: SpotCategory, themedCount: number, categorizedCount: number) {
+  if (theme === "europe" && themedCount === 0) {
+    return "当前暂无欧洲目的地候选，可以切换其他地区，或继续补充欧洲目的地数据。"
+  }
+  if (theme === "asia" && themedCount === 0) {
+    return "当前暂无亚洲目的地候选，可以先切换到国内，或继续补充目的地数据。"
+  }
+  if (theme === "domestic" && themedCount === 0) {
+    return "当前暂无国内目的地候选，可以切换到推荐，或调整筛选条件。"
+  }
+  if (category === "hotel" && categorizedCount === 0) {
+    return "当前暂无酒店候选，可以清除类型筛选或调整价格范围。"
+  }
+  if (category === "restaurant" && categorizedCount === 0) {
+    return "当前暂无美食候选，可以清除类型筛选或调整关键词。"
+  }
+  if (category === "attraction" && categorizedCount === 0) {
+    return "当前暂无景点候选，可以清除类型筛选或调整关键词。"
+  }
+  return "当前筛选下暂无匹配候选，可以清除筛选后重新浏览。"
 }
 
 export function ExplorePage({ onViewSpot }: ExplorePageProps) {
@@ -94,9 +124,13 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
   const debouncedQuery = useDebouncedValue(searchQuery, 220)
   const keyword = useMemo(() => normalizeKeyword(debouncedQuery), [debouncedQuery])
 
+  const themedSpots = useMemo(() => {
+    return sampleSpots.filter((spot) => matchesTheme(spot, activeTheme))
+  }, [activeTheme])
+
   const cityOptions = useMemo(() => {
     const cityMap = new Map<string, number>()
-    for (const spot of sampleSpots) {
+    for (const spot of themedSpots) {
       const city = spot.city?.trim()
       if (!city) continue
       cityMap.set(city, (cityMap.get(city) ?? 0) + 1)
@@ -105,10 +139,10 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 16)
       .map(([city]) => city)
-  }, [])
+  }, [themedSpots])
 
   const categoryCounter = useMemo(() => {
-    return sampleSpots.reduce(
+    return themedSpots.reduce(
       (acc, spot) => {
         acc.all += 1
         if (spot.type === "attraction") acc.attraction += 1
@@ -118,15 +152,15 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
       },
       { all: 0, attraction: 0, restaurant: 0, hotel: 0 }
     )
-  }, [])
+  }, [themedSpots])
 
   const categorizedSpots = useMemo(() => {
-    let base = sampleSpots
+    let base = themedSpots
     if (activeCategory !== "all") {
       base = base.filter((spot) => spot.type === activeCategory)
     }
-    return base.filter((spot) => matchesTheme(spot, activeTheme))
-  }, [activeCategory, activeTheme])
+    return base
+  }, [activeCategory, themedSpots])
 
   const filteredSpots = useMemo(() => {
     let result = categorizedSpots
@@ -162,6 +196,25 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
 
   const deferredSpots = useDeferredValue(filteredSpots)
   const isInTrip = (id: string) => selectedSpots.some((spot) => spot.id === id)
+  const emptyStateDescription = getEmptyStateDescription(
+    activeTheme,
+    activeCategory,
+    themedSpots.length,
+    categorizedSpots.length
+  )
+
+  function clearFilters() {
+    setSearchQuery("")
+    setActiveCategory("all")
+    setSortBy("heat")
+    setPriceRange([0, 2000])
+    setActiveCity("all")
+  }
+
+  function returnToRecommended() {
+    clearFilters()
+    setActiveTheme("recommended")
+  }
 
   return (
     <div className="app-page animate-fade-in space-y-4">
@@ -201,7 +254,10 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
                 type="button"
                 selected={activeTheme === item.id}
                 compact
-                onClick={() => setActiveTheme(item.id)}
+                onClick={() => {
+                  setActiveTheme(item.id)
+                  setActiveCity("all")
+                }}
               >
                 {item.label}
               </AppChip>
@@ -309,19 +365,25 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
 
       <div className="pb-6">
         {deferredSpots.length === 0 ? (
-          <EmptyStateCard
-            title="暂无匹配结果"
-            description="可以更换关键词、城市或价格区间再试。"
-            actionLabel="清空筛选"
-            onAction={() => {
-              setSearchQuery("")
-              setActiveCategory("all")
-              setActiveTheme("recommended")
-              setSortBy("heat")
-              setPriceRange([0, 2000])
-              setActiveCity("all")
-            }}
-          />
+          <AppCard tone="elevated" padding="lg" className="space-y-4 text-left">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--app-radius-md)] bg-[var(--app-brand-soft)] text-[var(--app-brand-strong)]">
+                <Compass className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 space-y-1">
+                <h3 className="text-base font-semibold text-[var(--app-text-strong)]">暂无匹配候选</h3>
+                <p className="text-sm leading-6 text-[var(--app-text-secondary)]">{emptyStateDescription}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <AppButton type="button" variant="secondary" onClick={clearFilters}>
+                清除筛选
+              </AppButton>
+              <AppButton type="button" variant="primary" onClick={returnToRecommended}>
+                返回推荐
+              </AppButton>
+            </div>
+          </AppCard>
         ) : (
           <VirtualizedPlaceList
             items={deferredSpots}

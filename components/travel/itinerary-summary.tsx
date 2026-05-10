@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { CalendarDays, Compass, MapPin, Sparkles } from "lucide-react"
+import { CalendarDays, CloudSun, Compass, MapPin, Sparkles, Thermometer, Wind } from "lucide-react"
 import type { TripPlan } from "@/lib/travel-context"
 
 interface ItinerarySummaryProps {
@@ -37,9 +37,44 @@ function buildRouteSentence(plan: TripPlan) {
   return "聚焦经典北京与顺路餐饮安排，减少折返，提升旅行从容度。"
 }
 
+function buildWeatherOverview(plan: TripPlan) {
+  const weather = plan.weatherSummary
+  if (!weather) return null
+
+  const firstForecast = weather.forecasts?.[0]
+  const label =
+    weather.source === "fallback"
+      ? "天气数据暂不可用"
+      : weather.live?.weather || firstForecast?.dayweather || "天气数据暂不可用"
+  const temp =
+    firstForecast?.daytemp && firstForecast?.nighttemp
+      ? `${firstForecast.nighttemp}-${firstForecast.daytemp}℃`
+      : weather.live?.temperature
+      ? `${weather.live.temperature}℃`
+      : "--"
+  const wind =
+    weather.live?.winddirection || weather.live?.windpower
+      ? `${weather.live.winddirection || ""}${weather.live.windpower || ""}`.trim()
+      : firstForecast?.daywind || firstForecast?.daypower
+      ? `${firstForecast.daywind || ""}${firstForecast.daypower || ""}`.trim()
+      : "风力暂缺"
+
+  return {
+    label,
+    temp,
+    wind,
+    summary:
+      weather.source === "fallback"
+        ? "天气数据暂不可用，本方案按常规出行条件生成。"
+        : weather.travelAdvice.summary,
+    tags: weather.travelAdvice.tags.slice(0, 4),
+  }
+}
+
 export function ItinerarySummary({ plan }: ItinerarySummaryProps) {
   const tags = buildStyleTags(plan)
   const routeSentence = buildRouteSentence(plan)
+  const weatherOverview = buildWeatherOverview(plan)
 
   return (
     <section className="relative overflow-hidden rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-5 shadow-[var(--app-shadow-soft)]">
@@ -70,6 +105,35 @@ export function ItinerarySummary({ plan }: ItinerarySummaryProps) {
             </span>
           ))}
         </div>
+
+        {weatherOverview && (
+          <div className="mt-4 rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] p-3">
+            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+              <span className="inline-flex items-center gap-1.5 text-[var(--app-text-secondary)]">
+                <CloudSun className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                {weatherOverview.label}
+              </span>
+              <span className="numeric inline-flex items-center gap-1.5 text-[var(--app-text-secondary)]">
+                <Thermometer className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                {weatherOverview.temp}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-[var(--app-text-secondary)]">
+                <Wind className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                {weatherOverview.wind}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-[var(--app-text-secondary)]">{weatherOverview.summary}</p>
+            {weatherOverview.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {weatherOverview.tags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-[var(--app-brand-soft)] px-2 py-0.5 text-[10px] text-[var(--app-brand)]">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <p className="mt-4 rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-sm leading-6 text-[var(--app-text-secondary)]">
           <span className="inline-flex items-center gap-1.5 font-medium text-[var(--app-text-primary)]">

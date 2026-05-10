@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { Clock3, MapPin, Route } from "lucide-react"
+import { Clock3, CloudSun, MapPin, Route, Thermometer, Wind } from "lucide-react"
 import { formatDistance, formatDuration } from "@/lib/amap-spot-utils"
 import { getDayHeadline, getDayLabel } from "@/lib/result-layout"
 import type { ItineraryDay } from "@/lib/travel-context"
@@ -10,6 +10,8 @@ interface ResultDayHeaderProps {
 }
 
 export function ResultDayHeader({ day }: ResultDayHeaderProps) {
+  const dayWeather = day.weather
+
   return (
     <section className="relative overflow-hidden rounded-[var(--app-radius-lg)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-5 shadow-[var(--app-shadow-soft)]">
       <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-[color:rgba(93,111,47,0.09)] blur-3xl" />
@@ -26,6 +28,30 @@ export function ResultDayHeader({ day }: ResultDayHeaderProps) {
             {day.districtSummary || "核心片区"}
           </span>
         </div>
+
+        {dayWeather && (
+          <div className="mt-3 rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--app-text-secondary)]">
+              <span className="inline-flex items-center gap-1.5 font-medium text-[var(--app-text-primary)]">
+                <CloudSun className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                {dayWeather.weather}
+              </span>
+              <span className="numeric inline-flex items-center gap-1">
+                <Thermometer className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                {dayWeather.temperatureText}
+              </span>
+              {dayWeather.windText && (
+                <span className="inline-flex items-center gap-1">
+                  <Wind className="h-3.5 w-3.5 text-[var(--app-brand)]" />
+                  {dayWeather.windText}
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 text-xs leading-5 text-[var(--app-text-secondary)]">
+              {day.weatherAdvice || dayWeather.advice}
+            </p>
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
           <article className="rounded-[0.85rem] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5">

@@ -9,10 +9,10 @@ import { EmptyStateCard } from "@/components/ui/empty-state-card"
 import { AppStatCard } from "@/components/ui/app-stat-card"
 import { AppTag } from "@/components/ui/app-tag"
 import { MapView, type RouteSummaryInfo } from "@/components/travel/map-view"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { SavedPlanCard } from "@/components/travel/saved-plan-card"
 import type { SpotNavigationIntent } from "@/lib/navigation"
 import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
-import { resolvePlaceImage } from "@/lib/place-image"
 import { Spot, useTravel } from "@/lib/travel-context"
 import { cn } from "@/lib/utils"
 
@@ -279,24 +279,13 @@ export function TripsPage({
                       <div className="numeric flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-[11px] font-semibold text-[var(--app-brand)]">
                         {index + 1}
                       </div>
-                      <img
-                        src={resolvePlaceImage({
-                          id: spot.id,
-                          name: spot.name,
-                          city: spot.city,
-                          province: spot.province,
-                          image: spot.image,
-                          coverImage: spot.image,
-                        })}
+                      <PlacePhotoImage
+                        name={spot.name}
+                        city={spot.city}
+                        province={spot.province}
+                        type={spot.type}
                         alt={spot.name}
                         className="h-14 w-14 flex-shrink-0 rounded-[0.8rem] object-cover"
-                        onError={(event) => {
-                          event.currentTarget.src = resolvePlaceImage({
-                            city: spot.city,
-                            province: spot.province,
-                            name: spot.name,
-                          })
-                        }}
                       />
                       <div className="min-w-0 flex-1">
                         <h4 className="truncate text-sm font-semibold text-[var(--app-text-strong)]">{spot.name}</h4>
@@ -340,9 +329,9 @@ export function TripsPage({
       ) : savedPlans.length === 0 ? (
         <div className="py-8">
           <EmptyStateCard
-            title="暂无已保存方案"
-            description="先去 AI 规划页生成并保存你的旅行方案。"
-            actionLabel="进入 AI 规划"
+            title="还没有保存的旅行方案"
+            description="先用 AI 生成一份专属行程吧"
+            actionLabel="去 AI 规划"
             onAction={() => onNavigate("ai")}
             icon={Calendar}
           />

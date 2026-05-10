@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { ChevronDown, Plus } from "lucide-react"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { AppTag } from "@/components/ui/app-tag"
-import { resolvePlaceImage } from "@/lib/place-image"
 import type { RecommendedPoiCandidate } from "@/lib/planner-recommendations"
 import { cn } from "@/lib/utils"
 
@@ -46,24 +46,13 @@ export function RecommendedPoiSection({
                 className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3"
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={resolvePlaceImage({
-                      id: item.spot.id,
-                      name: item.spot.name,
-                      city: item.spot.city,
-                      province: item.spot.province,
-                      image: item.spot.image,
-                      coverImage: item.spot.image,
-                    })}
+                  <PlacePhotoImage
+                    name={item.spot.name}
+                    city={item.spot.city}
+                    province={item.spot.province}
+                    type={item.spot.type}
                     alt={item.spot.name}
                     className="h-12 w-12 rounded-[0.75rem] object-cover"
-                    onError={(event) => {
-                      event.currentTarget.src = resolvePlaceImage({
-                        city: item.spot.city,
-                        province: item.spot.province,
-                        name: item.spot.name,
-                      })
-                    }}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{item.spot.name}</p>

@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { MapPin, Trash2 } from "lucide-react"
-import { resolvePlaceImage } from "@/lib/place-image"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import type { Spot } from "@/lib/travel-context"
 
 interface PoiCartProps {
@@ -48,24 +48,13 @@ export function PoiCart({ selectedPois, onRemove, onClear }: PoiCartProps) {
               <span className="numeric flex h-7 w-7 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-xs font-semibold text-[var(--app-brand)]">
                 {index + 1}
               </span>
-              <img
-                src={resolvePlaceImage({
-                  id: spot.id,
-                  name: spot.name,
-                  city: spot.city,
-                  province: spot.province,
-                  image: spot.image,
-                  coverImage: spot.image,
-                })}
+              <PlacePhotoImage
+                name={spot.name}
+                city={spot.city}
+                province={spot.province}
+                type={spot.type}
                 alt={spot.name}
                 className="h-12 w-12 rounded-[0.75rem] object-cover"
-                onError={(event) => {
-                  event.currentTarget.src = resolvePlaceImage({
-                    city: spot.city,
-                    province: spot.province,
-                    name: spot.name,
-                  })
-                }}
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>

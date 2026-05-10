@@ -6,6 +6,8 @@
   | "elderly"
   | "team"
 
+import type { DayWeather, WeatherPlanContext, WeatherSummary } from "@/lib/weather-types"
+
 export type PacePreference = "fast" | "balanced" | "slow"
 
 export type SelectedPoiType = "spot" | "food" | "hotel"
@@ -69,6 +71,9 @@ export interface GeneratedPlanDay {
   districtSummary?: string
   startTime?: string
   endTime?: string
+  weather?: DayWeather
+  weatherAdvice?: string
+  weatherTags?: string[]
   spots: GeneratedPlanSpot[]
   lunch?: GeneratedPlanSuggestion
   dinner?: GeneratedPlanSuggestion
@@ -82,6 +87,7 @@ export interface GeneratedPlan {
   destination: string
   totalDays: number
   totalBudget?: number
+  weatherSummary?: WeatherSummary
   days: GeneratedPlanDay[]
   droppedPlaceIds?: string[]
   explanations?: string[]
@@ -91,6 +97,8 @@ export interface PlannerDecisionRequest {
   destination: string
   city: string
   province: string
+  startDate?: string
+  endDate?: string
   totalDays: number
   budgetRange: string
   companions: CompanionType
@@ -102,6 +110,7 @@ export interface PlannerDecisionRequest {
   hotels: PlannerCandidate[]
   routeHints?: PlannerRouteHint[]
   manualPreferredPlaceIds?: string[]
+  weatherContext?: WeatherPlanContext
 }
 
 export interface PlannerDecisionResult {

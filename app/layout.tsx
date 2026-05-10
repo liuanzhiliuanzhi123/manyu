@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import type { Metadata } from 'next'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Noto_Sans_SC } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { AppPreferenceSync } from '@/components/travel/app-preference-sync'
@@ -14,9 +14,9 @@ const notoSansSC = Noto_Sans_SC({
 })
 
 export const metadata: Metadata = {
-  title: '途境漫语 - 智能旅行规划',
+  title: '拾景拼途 - 智能旅行规划',
   description:
-    '让每一次旅行都成为美好故事。智能行程规划，一键生成个性化旅行方案。',
+    '心动风景一键收藏，像加购物车一样拼出专属旅程。',
   generator: 'v0.app',
   icons: {
     icon: [

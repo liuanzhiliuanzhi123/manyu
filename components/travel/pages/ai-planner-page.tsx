@@ -28,6 +28,7 @@ import { PlannerConflictDialog } from "@/components/travel/planner-conflict-dial
 import { PlannerDateFields } from "@/components/travel/planner-date-fields"
 import { PlannerStepper } from "@/components/travel/planner-stepper"
 import { PlannerSummaryBar } from "@/components/travel/planner-summary-bar"
+import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { PoiCart } from "@/components/travel/poi-cart"
 import { ReplaceFoodSheet } from "@/components/travel/replace-food-sheet"
 import { ReplaceHotelSheet } from "@/components/travel/replace-hotel-sheet"
@@ -79,7 +80,6 @@ import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistenc
 import { calculatePlanQualityScore } from "@/lib/plan-quality-score"
 import { validatePlan } from "@/lib/plan-validator"
 import { buildAiItinerary } from "@/lib/route-planner"
-import { resolvePlaceImage } from "@/lib/place-image"
 import {
   type DaySuggestionItem,
   sampleSpots,
@@ -313,11 +313,17 @@ function applyStructuredSuggestions(
     const hotelCost = hotel?.price || 0
     const ticketCost = day.spots.reduce((sum, spot) => sum + (spot.ticketPrice || 0), 0)
     const warnings = Array.from(new Set([...(day.warnings || []), ...(generated.warnings || [])]))
+    const weather = generated.weather || day.weather
+    const weatherAdvice = generated.weatherAdvice || weather?.advice || day.weatherAdvice
+    const weatherTags = generated.weatherTags || weather?.tags || day.weatherTags
 
     return {
       ...day,
       theme: generated.theme || day.theme,
       districtSummary: generated.districtSummary || day.districtSummary,
+      weather,
+      weatherAdvice,
+      weatherTags,
       lunchSuggestion: lunch,
       dinnerSuggestion: dinner,
       hotelSuggestion: hotel,
@@ -820,12 +826,21 @@ export function AIPlannnerPage({
           forcedDayMetas: dayMetas,
         })
 
-        const totals = computePlanTotals(itineraryResult.days)
+        const rebuiltDays = itineraryResult.days.map((day) => {
+          const sourceDay = sourceDays.find((item) => item.day === day.day)
+          return {
+            ...day,
+            weather: sourceDay?.weather,
+            weatherAdvice: sourceDay?.weatherAdvice,
+            weatherTags: sourceDay?.weatherTags,
+          }
+        })
+        const totals = computePlanTotals(rebuiltDays)
         const nextPlan: TripPlan = {
           ...seedPlan,
           spots: routeSpots,
-          days: itineraryResult.days,
-          totalDays: itineraryResult.days.length,
+          days: rebuiltDays,
+          totalDays: rebuiltDays.length,
           totalSpots: routeSpots.length,
           ...totals,
           generationStatus: itineraryResult.status,
@@ -1234,6 +1249,8 @@ export function AIPlannnerPage({
         destination: `${requirement.city} ${requirement.days}日游`,
         city: requirement.city,
         province: requirement.province,
+        startDate,
+        endDate,
         totalDays: requirement.days,
         budgetRange: requirement.budgetRange,
         companions: requirement.companions,
@@ -1262,7 +1279,9 @@ export function AIPlannnerPage({
       const forcedDayMetas = plannerDecision?.plan.days.map((day) => ({
         theme: day.theme,
         districtSummary: day.districtSummary,
-        warnings: day.warnings,
+        warnings: Array.from(
+          new Set([...(day.warnings || []), ...(day.weatherAdvice ? [`天气提醒：${day.weatherAdvice}`] : [])])
+        ),
       }))
       const forcedSpotReasonMap: Record<string, string> = {}
       if (plannerDecision) {
@@ -1352,6 +1371,7 @@ export function AIPlannnerPage({
         totalTravelSeconds: totals.totalTravelSeconds,
         totalPlayMinutes: totals.totalPlayMinutes,
         totalEstimatedCost: totals.totalEstimatedCost,
+        weatherSummary: plannerDecision?.plan.weatherSummary,
         generationStatus: itineraryResult.status,
         generationNotices: notices,
         requirement,
@@ -1565,24 +1585,13 @@ export function AIPlannnerPage({
                     className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5"
                   >
                     <div className="flex items-center gap-3">
-                      <img
-                        src={resolvePlaceImage({
-                          id: spot.id,
-                          name: spot.name,
-                          city: spot.city,
-                          province: spot.province,
-                          image: spot.image,
-                          coverImage: spot.image,
-                        })}
+                      <PlacePhotoImage
+                        name={spot.name}
+                        city={spot.city}
+                        province={spot.province}
+                        type={spot.type}
                         alt={spot.name}
                         className="h-11 w-11 rounded-lg object-cover"
-                        onError={(event) => {
-                          event.currentTarget.src = resolvePlaceImage({
-                            city: spot.city,
-                            province: spot.province,
-                            name: spot.name,
-                          })
-                        }}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
