@@ -87,6 +87,8 @@ const DEFAULT_DISTANCE_TEXT = "--"
 const DEFAULT_DURATION_TEXT = "--"
 const EMPTY_ROUTE_SEGMENT_IDS: string[] = []
 const AMAP_LOAD_TIMEOUT_MS = 12000
+const AMAP_STANDARD_MAP_STYLE = "amap://styles/normal"
+const MAP_LOAD_ERROR_MESSAGE = "地图加载失败，请检查高德 Key、域名白名单或安全密钥配置。"
 
 interface MarkerMeta {
   spotId: string
@@ -182,6 +184,20 @@ function getUserLocationStatusText(
   if (status === "unsupported") return "当前浏览器不支持定位"
   if (status === "error") return errorText || "定位失败，请稍后重试"
   return "未开启定位"
+}
+
+function logAmapMapError(context: string, error: unknown, code?: string | null) {
+  const rawMessage =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+      ? error.message
+      : getAMapErrorMessage(error)
+  console.error("[AMap] map rendering failed", {
+    context,
+    code: code || undefined,
+    message: rawMessage || "unknown amap error",
+  })
 }
 
 function getUnknownMessage(error: unknown) {
@@ -875,16 +891,25 @@ export function MapView({
           zoom: 11,
           resizeEnable: true,
           viewMode: "2D",
+          mapStyle: AMAP_STANDARD_MAP_STYLE,
+          features: ["bg", "road", "building", "point"],
+          showLabel: true,
+          layers: [new AMap.TileLayer()],
+          zoomEnable: true,
+          dragEnable: true,
         })
         currentMap = map
         mapRef.current = map
+        map.on("complete", () => {
+          requestAnimationFrame(() => map.resize())
+        })
 
         handleMapError = (event?: unknown) => {
           const rawError = getAMapErrorMessage(event)
           if (!rawError) return
           const analysis = analyzeAmapError(
             rawError,
-            "地图瓦片加载异常，请检查 Key 白名单或安全配置"
+            MAP_LOAD_ERROR_MESSAGE
           )
           const knownFatal = new Set([
             "INVALID_USER_SCODE",
@@ -892,6 +917,7 @@ export function MapView({
             "INVALID_USER_KEY",
           ])
           if (!analysis.code || !knownFatal.has(analysis.code)) return
+          logAmapMapError("map-error-event", rawError, analysis.code)
           const message = analysis.userMessage
           setMapError(message)
           setSummary((prev) => ({
@@ -925,7 +951,8 @@ export function MapView({
           resizeObserverRef.current = observer
         }
       } catch (error) {
-        const analysis = analyzeAmapError(error, "地图加载失败，请检查高德配置")
+        const analysis = analyzeAmapError(error, MAP_LOAD_ERROR_MESSAGE)
+        logAmapMapError("map-init", error, analysis.code)
         const message = analysis.userMessage
         setMapError(message)
         setSummary((prev) => ({
@@ -1626,8 +1653,8 @@ export function MapView({
   }, [highlightedSegmentId])
 
   return (
-    <div className="relative w-full h-[360px] rounded-2xl overflow-hidden bg-secondary">
-      <div ref={mapContainerRef} className="w-full h-full" />
+    <div className="relative h-[360px] min-h-[320px] w-full overflow-hidden rounded-2xl bg-[#e8ede1]">
+      <div ref={mapContainerRef} className="amap-real-map absolute inset-0 h-full w-full" />
 
       {!isMapLoading && !mapError && (
         <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between gap-2 pointer-events-none">
@@ -1691,11 +1718,20 @@ export function MapView({
         </div>
       )}
 
-      {(isMapLoading || isRouteLoading) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[color:rgba(243,241,235,0.72)] backdrop-blur-[1px]">
+      {isMapLoading && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[color:rgba(243,241,235,0.72)]">
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-2 text-sm text-[var(--app-text-secondary)]">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span>{isMapLoading ? "地图加载中..." : "路线规划中..."}</span>
+            <span>地图加载中...</span>
+          </div>
+        </div>
+      )}
+
+      {!isMapLoading && isRouteLoading && !mapError && (
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--app-line)] bg-[var(--app-surface-elevated)] px-3 py-2 text-xs text-[var(--app-text-secondary)] shadow-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>路线规划中...</span>
           </div>
         </div>
       )}
@@ -1710,11 +1746,10 @@ export function MapView({
       )}
 
       {!isMapLoading && mapError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[color:rgba(245,233,231,0.95)] px-5">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[color:rgba(245,233,231,0.95)] px-5">
           <div className="text-center text-sm leading-6 text-[var(--app-error)]">
             <AlertTriangle className="w-8 h-8 mx-auto mb-2" />
-            <p>地图加载失败</p>
-            <p className="mt-1 text-xs opacity-90">当前无法加载地图，请检查高德配置或稍后重试。</p>
+            <p>{MAP_LOAD_ERROR_MESSAGE}</p>
             {mapError && <p className="mt-1 text-xs opacity-90">详细原因：{mapError}</p>}
           </div>
         </div>

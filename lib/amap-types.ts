@@ -21,6 +21,8 @@ export interface AMapMapInstance {
   destroy: () => void
 }
 
+export interface AMapTileLayerInstance {}
+
 export interface AMapBoundsInstance {
   extend: (position: LngLatTuple) => void
 }
@@ -168,8 +170,15 @@ export interface AMapNamespace {
       center?: LngLatTuple
       resizeEnable?: boolean
       viewMode?: "2D" | "3D"
+      mapStyle?: string
+      features?: Array<"bg" | "point" | "road" | "building">
+      showLabel?: boolean
+      layers?: AMapTileLayerInstance[]
+      zoomEnable?: boolean
+      dragEnable?: boolean
     }
   ) => AMapMapInstance
+  TileLayer: new (options?: Record<string, unknown>) => AMapTileLayerInstance
   Marker: new (options: {
     position: LngLatTuple
     title?: string

@@ -9,7 +9,9 @@ import {
   Loader2,
   MessageSquarePlus,
   RefreshCcw,
+  Route,
   Save,
+  Search,
   Share2,
   Sparkles,
 } from "lucide-react"
@@ -58,6 +60,7 @@ import type {
   PlannerCandidate,
   PlannerDecisionRequest,
   PlannerDecisionResult,
+  PoiBundle,
   SelectedPoiItem,
   TravelRequirement,
 } from "@/lib/planner-types"
@@ -481,7 +484,15 @@ export function AIPlannnerPage({
   onNavigate,
   entryDestination,
 }: AIPlannnerPageProps) {
-  const { selectedSpots, savePlan, currentPlan, setCurrentPlan } = useTravel()
+  const {
+    selectedSpots,
+    addSpot,
+    removeSpot,
+    clearSpots,
+    savePlan,
+    currentPlan,
+    setCurrentPlan,
+  } = useTravel()
   const didHydrateRef = useRef(false)
   const latestEntryTokenRef = useRef<number | null>(null)
   const manualSearchInputRef = useRef<HTMLInputElement | null>(null)
@@ -653,7 +664,7 @@ export function AIPlannnerPage({
 
   const manualSearchResult = useMemo(() => {
     const keyword = manualSearch.trim().toLowerCase()
-    if (!keyword) return allSelectableSpots.slice(0, 8)
+    if (!keyword) return []
     return allSelectableSpots.filter((spot) =>
       `${spot.name}${spot.address}${spot.tags.join("")}`
         .toLowerCase()
@@ -661,9 +672,30 @@ export function AIPlannnerPage({
     )
   }, [allSelectableSpots, manualSearch])
 
+  const hasManualSearchKeyword = manualSearch.trim().length > 0
+
   const selectedPoiIdSet = useMemo(
     () => new Set(selectedPois.map((item) => item.id)),
     [selectedPois]
+  )
+
+  const isBundleFullyAdded = useCallback(
+    (bundle: PoiBundle) => {
+      const destinationIds = bundle.poiIds.filter((id) => {
+        const found = allSelectableSpots.find((spot) => spot.id === id)
+        return found
+          ? isSpotInDestination(found, {
+              city: requirement.city,
+              province: requirement.province,
+            })
+          : false
+      })
+      return (
+        destinationIds.length > 0 &&
+        destinationIds.every((id) => selectedPoiIdSet.has(id))
+      )
+    },
+    [allSelectableSpots, requirement.city, requirement.province, selectedPoiIdSet]
   )
 
   const canGoNext = useMemo(() => {
@@ -1137,16 +1169,20 @@ export function AIPlannnerPage({
       return
     }
     setSelectedPois((prev) => uniqueSpots([...prev, found]))
+    addSpot(found)
     setManualSelectionCompleted(true)
     setSkipManualSelection(false)
   }
 
-  const handleAddBundle = (bundle: { poiIds: string[] }) => {
+  const handleAddBundle = (bundle: PoiBundle) => {
     const byId = new Map(allSelectableSpots.map((spot) => [spot.id, spot]))
     const spots = bundle.poiIds
       .map((id) => byId.get(id))
       .filter((item): item is Spot => Boolean(item))
-    if (spots.length === 0) return
+    if (spots.length === 0) {
+      setImportNotice("当前组合暂无可加入地点，请稍后再试")
+      return
+    }
     const matched = spots.filter((spot) =>
       isSpotInDestination(spot, {
         city: requirement.city,
@@ -1157,10 +1193,21 @@ export function AIPlannnerPage({
     if (removedCount > 0) {
       setImportNotice(`组合中有 ${removedCount} 个异地地点已自动过滤`)
     }
-    if (matched.length === 0) return
+    if (matched.length === 0) {
+      setImportNotice("组合地点与当前目的地不一致，已阻止加入")
+      return
+    }
+    const existingIds = new Set(selectedPois.map((spot) => spot.id))
+    const newSpots = matched.filter((spot) => !existingIds.has(spot.id))
+    if (newSpots.length === 0) {
+      setImportNotice(`“${bundle.title}”已在当前行程清单中`)
+      return
+    }
     setSelectedPois((prev) => uniqueSpots([...prev, ...matched]))
+    newSpots.forEach((spot) => addSpot(spot))
     setManualSelectionCompleted(true)
     setSkipManualSelection(false)
+    setImportNotice(`已加入“${bundle.title}”中的 ${newSpots.length} 个地点`)
   }
 
   const handleSkipStepThree = () => {
@@ -1443,16 +1490,13 @@ export function AIPlannnerPage({
       <AppCard tone="elevated" padding="md" className="soft-gradient relative overflow-hidden">
         <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[color:rgba(93,111,47,0.14)] blur-2xl" />
         <div className="relative space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[var(--app-radius-sm)] bg-[var(--app-brand)] text-white">
-                <Sparkles className="h-5 w-5" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-[18px] bg-[var(--app-brand-soft)] text-[var(--app-brand)] ring-1 ring-[color:rgba(93,111,47,0.18)]">
+                <Route className="h-5 w-5" strokeWidth={1.9} />
               </div>
               <div>
-                <h1 className="text-[1.2rem] font-semibold tracking-[0.01em] text-[var(--app-text-strong)]">AI 规划你的行程</h1>
-                <p className="mt-1 text-[11px] leading-5 text-[var(--app-text-secondary)]">
-                  按步骤完成目的地、偏好、预算设置，生成可直接执行的旅行路线。
-                </p>
+                <h1 className="text-[1.34rem] font-semibold leading-tight tracking-normal text-[var(--app-text-strong)]">AI 规划你的行程</h1>
               </div>
             </div>
             <AppTag tone="brand" className="numeric">
@@ -1563,12 +1607,16 @@ export function AIPlannnerPage({
             </AppCard>
 
             <AppCard tone="elevated" padding="md">
-              <RecommendedBundles bundles={recommendedBundles} onAddBundle={handleAddBundle} />
+              <RecommendedBundles
+                bundles={recommendedBundles}
+                onAddBundle={handleAddBundle}
+                isBundleAdded={isBundleFullyAdded}
+              />
             </AppCard>
 
-            <AppCard tone="elevated" padding="md">
-              <h4 className="text-sm font-semibold text-[var(--app-text-strong)]">手动搜索添加</h4>
-              <div className="mt-3">
+            <AppCard tone="elevated" padding="md" className="space-y-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-text-muted)]" />
                 <AppInput
                   ref={manualSearchInputRef}
                   type="text"
@@ -1576,52 +1624,65 @@ export function AIPlannnerPage({
                   onChange={(event) => setManualSearch(event.target.value)}
                   placeholder="搜索景点、美食或住宿"
                   tone="subtle"
+                  density="lg"
+                  className="pl-10"
                 />
               </div>
-              <div className="mt-3 space-y-2">
-                {manualSearchResult.slice(0, 6).map((spot) => (
-                  <article
-                    key={spot.id}
-                    className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5"
-                  >
-                    <div className="flex items-center gap-3">
-                      <PlacePhotoImage
-                        name={spot.name}
-                        city={spot.city}
-                        province={spot.province}
-                        type={spot.type}
-                        alt={spot.name}
-                        className="h-11 w-11 rounded-lg object-cover"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+              {hasManualSearchKeyword && (
+                <div className="space-y-2">
+                  {manualSearchResult.slice(0, 6).map((spot) => (
+                    <article
+                      key={spot.id}
+                      className="rounded-[var(--app-radius-sm)] border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-3">
+                        <PlacePhotoImage
+                          name={spot.name}
+                          city={spot.city}
+                          province={spot.province}
+                          type={spot.type}
+                          alt={spot.name}
+                          className="h-11 w-11 rounded-lg object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-[var(--app-text-strong)]">{spot.name}</p>
+                          <p className="mt-0.5 truncate text-xs text-[var(--app-text-secondary)]">{spot.address}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddSpot(spot.id)}
+                          className={cn(
+                            "rounded-[0.65rem] px-2.5 py-1.5 text-xs font-medium",
+                            selectedPoiIdSet.has(spot.id)
+                              ? "bg-[var(--app-brand-soft)] text-[var(--app-brand)]"
+                              : "bg-[var(--app-brand)] text-white"
+                          )}
+                        >
+                          {selectedPoiIdSet.has(spot.id) ? "已加入" : "加入"}
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleAddSpot(spot.id)}
-                        className={cn(
-                          "rounded-[0.65rem] px-2.5 py-1.5 text-xs font-medium",
-                          selectedPoiIdSet.has(spot.id)
-                            ? "bg-[var(--app-brand-soft)] text-[var(--app-brand)]"
-                            : "bg-[var(--app-brand)] text-white"
-                        )}
-                      >
-                        {selectedPoiIdSet.has(spot.id) ? "已加入" : "加入"}
-                      </button>
+                    </article>
+                  ))}
+                  {manualSearchResult.length === 0 && (
+                    <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-3 text-xs text-[var(--app-text-secondary)]">
+                      暂无匹配地点，可以换个关键词试试。
                     </div>
-                  </article>
-                ))}
-              </div>
+                  )}
+                </div>
+              )}
             </AppCard>
 
             <AppCard tone="elevated" padding="md">
               <PoiCart
                 selectedPois={selectedPois}
-                onRemove={(spotId) =>
+                onRemove={(spotId) => {
                   setSelectedPois((prev) => prev.filter((spot) => spot.id !== spotId))
-                }
-                onClear={() => setSelectedPois([])}
+                  removeSpot(spotId)
+                }}
+                onClear={() => {
+                  setSelectedPois([])
+                  clearSpots()
+                }}
               />
               <p className="mt-3 rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-xs text-[var(--app-text-secondary)]">
                 {stepThreeStatusText}

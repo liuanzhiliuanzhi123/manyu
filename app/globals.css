@@ -506,3 +506,30 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .amap-controls .amap-geolocation-con {
   display: none !important;
 }
+
+.amap-real-map,
+.amap-real-map .amap-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 320px;
+  background: #e8ede1 !important;
+}
+
+.amap-real-map img,
+.amap-real-map canvas {
+  max-width: none !important;
+  filter: none !important;
+  opacity: 1;
+}
+
+.amap-real-map .amap-maps,
+.amap-real-map .amap-layers,
+.amap-real-map .amap-layer {
+  z-index: 0;
+}
+
+.amap-real-map .amap-controls,
+.amap-real-map .amap-logo,
+.amap-real-map .amap-copyright {
+  z-index: 15;
+}

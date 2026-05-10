@@ -56,8 +56,8 @@ function HomeMetric({
 
 export function HomePage({ onNavigate }: HomePageProps) {
   const { selectedSpots, favorites, currentPlan } = useTravel()
-  const hasDraft = Boolean(currentPlan)
   const selectedCount = selectedSpots.length
+  const hasDraft = Boolean(currentPlan) || selectedCount > 0
   const favoriteCount = favorites.length
 
   return (
@@ -162,7 +162,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </div>
           <div className="grid grid-cols-3 gap-2">
             <HomeMetric label="已选地点" value={selectedCount} detail={selectedCount > 0 ? "待编排" : "未添加"} />
-            <HomeMetric label="生成耗时" value="3-5 分" detail="智能整理" />
+            <HomeMetric label="生成耗时" value="10 秒" detail="智能整理" />
             <HomeMetric label="规划草稿" value={hasDraft ? "可继续" : "暂无"} detail={hasDraft ? "保留中" : "待生成"} />
           </div>
         </AppCard>

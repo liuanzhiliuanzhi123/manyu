@@ -219,10 +219,7 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
   return (
     <div className="app-page animate-fade-in space-y-4">
       <header className="space-y-3">
-        <AppPageHeader
-          title="发现目的地"
-          subtitle="挑选高质量候选地点，形成你的探索清单，再交给 AI 自动组装路线。"
-        />
+        <AppPageHeader title="发现目的地" />
 
         <AppCard tone="elevated" padding="md" className="space-y-3">
           <div className="relative">
