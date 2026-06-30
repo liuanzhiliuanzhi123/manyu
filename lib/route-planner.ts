@@ -199,7 +199,7 @@ function normalizeIdentityText(value?: string) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "")
-    .replace(/[()（）【】\[\]{}<>《》"'`.,，。:：;；!?！？、\-_/\\]/g, "")
+    .replace(/[()（）【】[\]{}<>《》"'`.,，。:：;；!?！？、\-_/\\]/g, "")
 }
 
 function hasValidRating(spot: Spot) {

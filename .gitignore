@@ -21,3 +21,6 @@ build
 # Local logs and generated caches
 .tmp_*
 tsconfig.tsbuildinfo
+.vercel
+.env*
+supabase/.temp/

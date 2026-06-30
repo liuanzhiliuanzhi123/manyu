@@ -21,7 +21,7 @@ export interface AMapMapInstance {
   destroy: () => void
 }
 
-export interface AMapTileLayerInstance {}
+export type AMapTileLayerInstance = object
 
 export interface AMapBoundsInstance {
   extend: (position: LngLatTuple) => void

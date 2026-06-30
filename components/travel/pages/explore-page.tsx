@@ -9,7 +9,6 @@ import { AppInput } from "@/components/ui/app-input"
 import { AppPageHeader } from "@/components/ui/app-page-header"
 import { AppTag } from "@/components/ui/app-tag"
 import { VirtualizedPlaceList } from "@/components/travel/virtualized-place-list"
-import { getPlaceRegion } from "@/lib/place-region"
 import { useDebouncedValue } from "@/lib/planner-performance"
 import { Spot, sampleSpots, useTravel } from "@/lib/travel-context"
 
@@ -19,7 +18,7 @@ interface ExplorePageProps {
 
 type SpotCategory = "all" | "attraction" | "restaurant" | "hotel"
 type SortMode = "heat" | "rating" | "price-low" | "price-high"
-type ThemeTab = "recommended" | "domestic" | "asia" | "europe" | "nature" | "culture"
+type ThemeTab = "recommended" | "beijing" | "nature" | "culture"
 
 const categories: Array<{ id: SpotCategory; label: string }> = [
   { id: "all", label: "全部" },
@@ -30,9 +29,7 @@ const categories: Array<{ id: SpotCategory; label: string }> = [
 
 const themeTabs: Array<{ id: ThemeTab; label: string }> = [
   { id: "recommended", label: "推荐" },
-  { id: "domestic", label: "国内" },
-  { id: "asia", label: "亚洲" },
-  { id: "europe", label: "欧洲" },
+  { id: "beijing", label: "北京" },
   { id: "nature", label: "自然" },
   { id: "culture", label: "文化" },
 ]
@@ -70,14 +67,8 @@ function matchesTheme(spot: Spot, theme: ThemeTab) {
   if (theme === "recommended") {
     return true
   }
-  if (theme === "domestic") {
-    return getPlaceRegion(spot) === "domestic"
-  }
-  if (theme === "asia") {
-    return getPlaceRegion(spot) === "asia"
-  }
-  if (theme === "europe") {
-    return getPlaceRegion(spot) === "europe"
+  if (theme === "beijing") {
+    return true
   }
   const joined = `${spot.name} ${spot.description} ${spot.tags.join(" ")}`
   if (theme === "nature") {
@@ -90,14 +81,8 @@ function matchesTheme(spot: Spot, theme: ThemeTab) {
 }
 
 function getEmptyStateDescription(theme: ThemeTab, category: SpotCategory, themedCount: number, categorizedCount: number) {
-  if (theme === "europe" && themedCount === 0) {
-    return "当前暂无欧洲目的地候选，可以切换其他地区，或继续补充欧洲目的地数据。"
-  }
-  if (theme === "asia" && themedCount === 0) {
-    return "当前暂无亚洲目的地候选，可以先切换到国内，或继续补充目的地数据。"
-  }
-  if (theme === "domestic" && themedCount === 0) {
-    return "当前暂无国内目的地候选，可以切换到推荐，或调整筛选条件。"
+  if (theme === "beijing" && themedCount === 0) {
+    return "当前暂无北京地点候选，可以切换到推荐，或调整筛选条件。"
   }
   if (category === "hotel" && categorizedCount === 0) {
     return "当前暂无酒店候选，可以清除类型筛选或调整价格范围。"
@@ -109,6 +94,11 @@ function getEmptyStateDescription(theme: ThemeTab, category: SpotCategory, theme
     return "当前暂无景点候选，可以清除类型筛选或调整关键词。"
   }
   return "当前筛选下暂无匹配候选，可以清除筛选后重新浏览。"
+}
+
+function isBeijingSpot(spot: Spot) {
+  const cityText = `${spot.city || ""}${spot.province || ""}${spot.address || ""}`
+  return cityText.includes("北京")
 }
 
 export function ExplorePage({ onViewSpot }: ExplorePageProps) {
@@ -125,7 +115,9 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
   const keyword = useMemo(() => normalizeKeyword(debouncedQuery), [debouncedQuery])
 
   const themedSpots = useMemo(() => {
-    return sampleSpots.filter((spot) => matchesTheme(spot, activeTheme))
+    return sampleSpots
+      .filter(isBeijingSpot)
+      .filter((spot) => matchesTheme(spot, activeTheme))
   }, [activeTheme])
 
   const cityOptions = useMemo(() => {
@@ -219,7 +211,7 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
   return (
     <div className="app-page animate-fade-in space-y-4">
       <header className="space-y-3">
-        <AppPageHeader title="发现目的地" />
+        <AppPageHeader title="发现北京地点" />
 
         <AppCard tone="elevated" padding="md" className="space-y-3">
           <div className="relative">
@@ -230,7 +222,7 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
               tone="subtle"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="搜索景点、美食、酒店、商圈"
+              placeholder="搜索北京景点、美食、酒店、商圈"
               className="pl-10 pr-9"
             />
             {searchQuery && (
@@ -310,11 +302,11 @@ export function ExplorePage({ onViewSpot }: ExplorePageProps) {
 
               <div>
                 <p className="mb-2 text-xs font-medium text-[var(--app-text-secondary)]">
-                  城市筛选 {activeCity !== "all" ? `· ${activeCity}` : ""}
+                  北京范围 {activeCity !== "all" ? `· ${activeCity}` : ""}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   <AppChip type="button" compact selected={activeCity === "all"} onClick={() => setActiveCity("all")}>
-                    全部城市
+                    北京全部
                   </AppChip>
                   {cityOptions.map((city) => (
                     <AppChip

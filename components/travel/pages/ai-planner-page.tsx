@@ -820,9 +820,9 @@ export function AIPlannnerPage({
       if (!seedPlan) return
       const sourceDays = seedPlan.days || []
       const dayMetas = sourceDays.map((day) => ({
-        theme: day.theme,
+        theme: day.theme || "当日路线",
         districtSummary: day.districtSummary,
-        warnings: day.warnings,
+        warnings: day.warnings || [],
       }))
       const availableSpotMap = new Map(
         uniqueAttractionSpots([

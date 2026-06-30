@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿"use client"
+"use client"
 
 import {
   createContext,
@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { searchCozeDatabase } from "./coze-api"
 import { beijingSpotSeeds } from "@/lib/beijing-place-data"
 import type { TransitStep } from "@/lib/amap-route-utils"
 import type {
@@ -27,10 +26,19 @@ import type {
 import type { DayWeather, WeatherSummary } from "@/lib/weather-types"
 import {
   loadCurrentPlanIdFromStorage,
-  loadSavedPlansFromStorage,
   persistCurrentPlanIdToStorage,
-  persistSavedPlansToStorage,
 } from "@/lib/plan-persistence"
+import {
+  listSavedPlaces,
+  removeSavedPlace,
+  upsertSavedPlace,
+} from "@/lib/travel-data/saved-places"
+import {
+  deleteSavedTrip,
+  listSavedTrips,
+  saveTrip as persistSavedTrip,
+} from "@/lib/travel-data/saved-trips"
+import { upsertTripDraft } from "@/lib/travel-data/trip-drafts"
 
 export interface Spot {
   id: string
@@ -208,16 +216,6 @@ function toText(value: unknown): string {
   return ""
 }
 
-function toNumberValue(value: unknown, fallback: number): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-      ? Number(value.trim())
-      : NaN
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -226,15 +224,6 @@ function toStringArray(value: unknown): string[] {
   }
   const asText = toText(value)
   return asText ? [asText] : []
-}
-
-function normalizeSpotType(value: unknown): Spot["type"] {
-  const text = toText(value).toLowerCase()
-  if (text === "spot") return "attraction"
-  if (text === "food") return "restaurant"
-  if (text === "restaurant") return "restaurant"
-  if (text === "hotel") return "hotel"
-  return "attraction"
 }
 
 function normalizeLocation(value: unknown): Spot["location"] | undefined {
@@ -345,7 +334,7 @@ const FALLBACK_SPOTS: Spot[] = [
     rating: 4.9,
     heat: 96,
     ticketPrice: 60,
-    description: "全国热门历史文化景点",
+    description: "北京经典历史文化景点",
     image: "/images/placeholders/poi-default.jpg",
     tags: ["历史人文", "热门"],
     city: "北京",
@@ -361,6 +350,28 @@ export const sampleSpots: Spot[] =
       }))
     : FALLBACK_SPOTS
 
+function normalizeSearchKeyword(input: string) {
+  return input.trim().toLowerCase().replace(/\s+/g, "")
+}
+
+function matchesLocalSpotSearch(spot: Spot, keyword: string) {
+  if (!keyword) return true
+  const source = [
+    spot.name,
+    spot.address,
+    spot.city,
+    spot.province,
+    spot.district,
+    spot.description,
+    spot.tags.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+  return source.includes(keyword)
+}
+
 export function TravelProvider({ children }: { children: ReactNode }) {
   const [selectedSpots, setSelectedSpots] = useState<Spot[]>([])
   const [savedPlans, setSavedPlans] = useState<TripPlan[]>([])
@@ -368,24 +379,57 @@ export function TravelProvider({ children }: { children: ReactNode }) {
   const [favorites, setFavorites] = useState<string[]>([])
   const [searchResults, setSearchResults] = useState<Spot[]>([])
   const [isSearching, setIsSearching] = useState(false)
+  const [hasHydratedData, setHasHydratedData] = useState(false)
 
   useEffect(() => {
-    const plans = loadSavedPlansFromStorage()
-    if (plans.length === 0) return
-    setSavedPlans(plans)
-    const currentPlanId = loadCurrentPlanIdFromStorage()
-    if (!currentPlanId) return
-    const matched = plans.find((item) => item.id === currentPlanId) || null
-    setCurrentPlanState(matched)
+    let cancelled = false
+
+    async function hydrateTravelData() {
+      const [plansResult, placesResult] = await Promise.all([
+        listSavedTrips(),
+        listSavedPlaces(),
+      ])
+      if (cancelled) return
+
+      const plans = plansResult.data
+      setSavedPlans(plans)
+      const currentPlanId = loadCurrentPlanIdFromStorage()
+      if (currentPlanId) {
+        const matched = plans.find((item) => item.id === currentPlanId) || null
+        setCurrentPlanState(matched)
+      }
+
+      if (placesResult.data.length > 0) {
+        const normalizedPlaces = placesResult.data.map((spot) => sanitizeSpotInput(spot))
+        setSelectedSpots(normalizedPlaces)
+        setFavorites(normalizedPlaces.map((spot) => spot.id))
+      }
+      setHasHydratedData(true)
+    }
+
+    void hydrateTravelData()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
-
-  useEffect(() => {
-    persistSavedPlansToStorage(savedPlans)
-  }, [savedPlans])
 
   useEffect(() => {
     persistCurrentPlanIdToStorage(currentPlanState?.id || null)
   }, [currentPlanState?.id])
+
+  useEffect(() => {
+    if (!hasHydratedData) return
+    void upsertTripDraft({
+      city: "北京",
+      title: currentPlanState?.name || "北京智能行程草稿",
+      days: currentPlanState?.totalDays || currentPlanState?.days?.length || null,
+      pace: currentPlanState?.pace || null,
+      preferences: currentPlanState?.requirement?.interests || [],
+      selectedSpots,
+      currentPlan: currentPlanState,
+    })
+  }, [currentPlanState, hasHydratedData, selectedSpots])
 
   useEffect(() => {
     setSelectedSpots((prev) => {
@@ -415,14 +459,23 @@ export function TravelProvider({ children }: { children: ReactNode }) {
       if (prev.some((item) => item.id === normalizedSpot.id)) return prev
       return [...prev, normalizedSpot]
     })
+    void upsertSavedPlace(normalizedSpot)
   }, [])
 
   const removeSpot = useCallback((id: string) => {
     setSelectedSpots((prev) => prev.filter((spot) => spot.id !== id))
+    setFavorites((prev) => prev.filter((item) => item !== id))
+    void removeSavedPlace(id)
   }, [])
 
   const clearSpots = useCallback(() => {
-    setSelectedSpots([])
+    setSelectedSpots((prev) => {
+      prev.forEach((spot) => {
+        void removeSavedPlace(spot.id)
+      })
+      return []
+    })
+    setFavorites([])
   }, [])
 
   const savePlan = useCallback((plan: TripPlan) => {
@@ -440,11 +493,19 @@ export function TravelProvider({ children }: { children: ReactNode }) {
       return next
     })
     setCurrentPlanState(normalized)
+    void persistSavedTrip(normalized).then((result) => {
+      if (result.source !== "supabase" || result.data.id === normalized.id) return
+      setSavedPlans((prev) =>
+        prev.map((item) => (item.id === normalized.id ? result.data : item))
+      )
+      setCurrentPlanState((prev) => (prev?.id === normalized.id ? result.data : prev))
+    })
   }, [])
 
   const deletePlan = useCallback((id: string) => {
     setSavedPlans((prev) => prev.filter((plan) => plan.id !== id))
     setCurrentPlanState((prev) => (prev?.id === id ? null : prev))
+    void deleteSavedTrip(id)
   }, [])
 
   const openPlan = useCallback(
@@ -460,11 +521,24 @@ export function TravelProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const toggleFavorite = useCallback((id: string) => {
+    const sourceSpot =
+      selectedSpots.find((spot) => spot.id === id) ||
+      searchResults.find((spot) => spot.id === id) ||
+      sampleSpots.find((spot) => spot.id === id)
+
     setFavorites((prev) => {
-      if (prev.includes(id)) return prev.filter((item) => item !== id)
+      if (prev.includes(id)) {
+        if (!selectedSpots.some((spot) => spot.id === id)) {
+          void removeSavedPlace(id)
+        }
+        return prev.filter((item) => item !== id)
+      }
+      if (sourceSpot) {
+        void upsertSavedPlace(sanitizeSpotInput(sourceSpot))
+      }
       return [...prev, id]
     })
-  }, [])
+  }, [searchResults, selectedSpots])
 
   const searchSpots = useCallback(async (query: string) => {
     if (!query.trim()) {
@@ -474,46 +548,11 @@ export function TravelProvider({ children }: { children: ReactNode }) {
 
     setIsSearching(true)
     try {
-      const results = await searchCozeDatabase(query)
-      // 转换结果为 Spot 类型
-      const spots = results.map((item: unknown, index: number): Spot => {
-        const payload =
-          item && typeof item === "object"
-            ? (item as Record<string, unknown>)
-            : {}
-
-        const id =
-          toText(payload.id) ||
-          `coze-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`
-
-        return {
-          id,
-          name: toText(payload.name) || toText(payload.title) || "未知景点",
-          type: normalizeSpotType(payload.type),
-          address: getAddressFromPayload(payload),
-          rating: toNumberValue(payload.rating, 4.0),
-          heat: toNumberValue(payload.heat, 50),
-          ticketPrice: toNumberValue(payload.ticketPrice ?? payload.price, 0),
-          description:
-            toText(payload.description) || toText(payload.content) || "暂无描述",
-          image:
-            toText(payload.image) ||
-            toText(payload.photo) ||
-            "https://placehold.co/600x400?text=No+Image",
-          tags: toStringArray(payload.tags ?? payload.keywords),
-          openTime: toText(payload.openTime) || toText(payload.openingHours),
-          phone: toText(payload.phone) || toText(payload.contact),
-          city: getCityFromPayload(payload),
-          province: getProvinceFromPayload(payload),
-          district: getDistrictFromPayload(payload),
-          lng: payload.lng as number | string | undefined,
-          lat: payload.lat as number | string | undefined,
-          longitude: payload.longitude as number | string | undefined,
-          latitude: payload.latitude as number | string | undefined,
-          location: normalizeLocation(payload.location),
-          coordinates: normalizeCoordinates(payload.coordinates),
-        }
-      })
+      const keyword = normalizeSearchKeyword(query)
+      const spots = sampleSpots
+        .filter((spot) => matchesLocalSpotSearch(spot, keyword))
+        .slice(0, 50)
+        .map((spot) => sanitizeSpotInput(spot))
       setSearchResults(spots)
     } catch (error) {
       console.error("搜索失败:", error)

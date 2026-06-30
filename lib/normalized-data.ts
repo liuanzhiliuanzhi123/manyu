@@ -182,11 +182,13 @@ export function toSpotLikeRecord(poi: NormalizedPoiRecord): SpotLikeRecord {
   const ticketPrice = Number.isFinite(poi.price) ? Math.max(0, Number(poi.price.toFixed(2))) : 0
   const spotType = toSpotType(poi.category)
   const suggestedDurationMinutes = estimateVisitMinutes(poi.category)
+  const lng = poi.lng
+  const lat = poi.lat
   const hasCoordinates =
-    typeof poi.lng === "number" &&
-    Number.isFinite(poi.lng) &&
-    typeof poi.lat === "number" &&
-    Number.isFinite(poi.lat)
+    typeof lng === "number" &&
+    Number.isFinite(lng) &&
+    typeof lat === "number" &&
+    Number.isFinite(lat)
 
   return {
     id: poi.id,
@@ -210,17 +212,17 @@ export function toSpotLikeRecord(poi: NormalizedPoiRecord): SpotLikeRecord {
     province: poi.province,
     city: poi.city,
     district: poi.district,
-    lng: poi.lng,
-    lat: poi.lat,
+    lng,
+    lat,
     location: hasCoordinates
       ? {
-          lng: poi.lng,
-          lat: poi.lat,
+          lng,
+          lat,
           city: poi.city,
           address: poi.address,
         }
       : undefined,
-    coordinates: hasCoordinates ? [poi.lng, poi.lat] : undefined,
+    coordinates: hasCoordinates ? [lng, lat] : undefined,
     suggestedDurationMinutes,
     suggestedDurationText:
       spotType === "attraction"

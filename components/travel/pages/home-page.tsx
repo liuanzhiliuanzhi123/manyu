@@ -67,13 +67,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
           className="items-center pt-1"
           label={
             <span className="font-semibold tracking-[0.16em] text-[var(--app-brand)]">
-              AI TRAVEL ASSISTANT
+              BEIJING TRAVEL MVP
             </span>
           }
           title={<span className="gradient-text block text-[1.72rem] tracking-normal">拾景拼途</span>}
           subtitle={
             <span className="block max-w-[18rem] text-[0.86rem] leading-6">
-              心动风景一键收藏，像加购物车一样拼出专属旅程。
+              先把想去的北京地点加入行程，再让 AI 生成顺路方案。
             </span>
           }
           trailing={
@@ -96,7 +96,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
           <div className="relative space-y-5 px-5 py-6">
             <div className="flex items-start justify-between gap-4">
-              <AppTag className="w-fit border-white/16 bg-white/12 text-white">旅程规划主引擎</AppTag>
+              <AppTag className="w-fit border-white/16 bg-white/12 text-white">北京行程规划主引擎</AppTag>
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[14px] bg-white/10 text-white/90 ring-1 ring-white/12">
                 <MapPinned className="h-[1.125rem] w-[1.125rem]" strokeWidth={1.7} />
               </span>
@@ -104,10 +104,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
             <div className="max-w-[18rem] space-y-2.5">
               <h2 className="text-[1.58rem] font-semibold leading-[1.2] tracking-normal text-white">
-                生成你的专属旅行手册
+                生成你的北京智能行程
               </h2>
               <p className="text-[13px] leading-6 text-white/84">
-                收藏景点、美食与酒店，自动整理路线、吃住和每日安排。
+                收藏北京景点、美食与酒店，自动整理路线、吃住和每日安排。
               </p>
             </div>
 
@@ -119,7 +119,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 onClick={() => onNavigate("ai")}
               >
                 <Route className="h-[1.06rem] w-[1.06rem]" strokeWidth={1.85} />
-                开始规划旅程
+                开始规划北京行程
               </AppButton>
               <AppButton
                 type="button"
@@ -129,7 +129,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 onClick={() => onNavigate("explore")}
               >
                 <Compass className="h-[1.04rem] w-[1.04rem]" strokeWidth={1.8} />
-                浏览目的地
+                浏览北京地点
               </AppButton>
             </div>
           </div>
@@ -142,7 +142,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               readOnly
               tone="subtle"
               density="lg"
-              placeholder="搜索城市、景点、美食或酒店"
+              placeholder="搜索北京景点、美食或酒店"
               className="cursor-pointer rounded-[22px] border-[var(--app-line)] bg-[var(--app-surface)] pl-10 text-[var(--app-text-secondary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]"
               onClick={() => onNavigate("explore")}
               onFocus={() => onNavigate("explore")}
@@ -155,7 +155,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             <div>
               <p className="text-sm font-semibold text-[var(--app-text-strong)]">当前行程状态</p>
               <p className="mt-1 text-[11px] text-[var(--app-text-secondary)]">
-                先收集，再交给 AI 串成顺路方案。
+                先收集北京地点，再交给 AI 串成顺路方案。
               </p>
             </div>
             <CalendarCheck2 className="h-5 w-5 text-[var(--app-brand)]" strokeWidth={1.75} />
@@ -177,14 +177,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
               <div className="space-y-1">
                 <h2 className="text-base font-semibold tracking-normal text-[var(--app-text-strong)]">你的旅程清单</h2>
                 <p className="text-[12px] leading-5 text-[var(--app-text-secondary)]">
-                  先把想去的地方加入行程，再让 AI 帮你拼成顺路方案。
+                  先把想去的北京地点加入行程，再让 AI 帮你拼成顺路方案。
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-[11px] text-[var(--app-text-secondary)]">
                 <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-surface-muted)] px-2.5 py-1">
                   <MapPinned className="h-3.5 w-3.5 text-[var(--app-brand)]" strokeWidth={1.75} />
-                  <span className="numeric">{selectedCount}</span> 个已选地点
+                  <span className="numeric">{selectedCount}</span> 个已选北京地点
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-surface-muted)] px-2.5 py-1">
                   <Bookmark className="h-3.5 w-3.5 text-[var(--app-brand)]" strokeWidth={1.75} />
@@ -198,7 +198,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
                 </AppButton>
                 <AppButton type="button" variant="secondary" size="md" onClick={() => onNavigate("explore")}>
-                  继续添加地点
+                  继续添加北京地点
                 </AppButton>
               </div>
             </div>
