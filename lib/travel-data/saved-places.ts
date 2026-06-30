@@ -12,7 +12,7 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined"
 }
 
-function readLocalSavedPlaces(): Spot[] {
+export function readLocalSavedPlaces(): Spot[] {
   if (!isBrowser()) return []
   try {
     const raw = window.localStorage.getItem(LOCAL_SAVED_PLACES_KEY)
@@ -24,9 +24,13 @@ function readLocalSavedPlaces(): Spot[] {
   }
 }
 
-function writeLocalSavedPlaces(places: Spot[]) {
+export function writeLocalSavedPlaces(places: Spot[]) {
   if (!isBrowser()) return
-  window.localStorage.setItem(LOCAL_SAVED_PLACES_KEY, JSON.stringify(places))
+  try {
+    window.localStorage.setItem(LOCAL_SAVED_PLACES_KEY, JSON.stringify(places))
+  } catch {
+    // Local guest data is best-effort and must not break the page.
+  }
 }
 
 function upsertLocalSavedPlace(place: Spot) {

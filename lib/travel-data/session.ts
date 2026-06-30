@@ -14,7 +14,7 @@ export async function getTravelDataSupabaseContext() {
   if (error || !data.user) {
     return {
       available: false as const,
-      reason: error?.message || "No active Supabase session.",
+      reason: "No active Supabase session.",
     }
   }
 

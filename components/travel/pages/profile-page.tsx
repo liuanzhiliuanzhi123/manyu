@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   Bell,
   CalendarDays,
@@ -32,6 +33,7 @@ import { PlacePhotoImage } from "@/components/travel/place-photo-image"
 import { ProfileSubpage } from "@/components/travel/profile-subpage"
 import { SavedPlanCard } from "@/components/travel/saved-plan-card"
 import { buildPlanShareSummary, toShareSummaryText } from "@/lib/plan-persistence"
+import { useAuth } from "@/lib/auth/use-auth"
 import {
   AppLanguage,
   getStoredLanguage,
@@ -101,13 +103,23 @@ const SUBPAGE_TITLE: Record<Exclude<ActiveSubpage, null>, string> = {
 }
 
 export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: ProfilePageProps) {
-  const { favorites, savedPlans, selectedSpots, toggleFavorite, deletePlan } = useTravel()
+  const router = useRouter()
+  const { user, isAuthenticated, loading: authLoading, signOut } = useAuth()
+  const {
+    currentPlan,
+    favorites,
+    savedPlans,
+    selectedSpots,
+    toggleFavorite,
+    deletePlan,
+  } = useTravel()
   const { theme, resolvedTheme, setTheme } = useTheme()
 
   const [language, setLanguage] = useState<AppLanguage>("zh-CN")
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null)
   const [activeSubpage, setActiveSubpage] = useState<ActiveSubpage>(null)
   const [feedback, setFeedback] = useState("")
+  const [isSigningOut, setIsSigningOut] = useState(false)
 
   const isDarkMode = (resolvedTheme ?? theme) === "dark"
 
@@ -115,10 +127,15 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
     setLanguage(getStoredLanguage())
   }, [])
 
-  const favoriteSpots = useMemo(
-    () => sampleSpots.filter((spot) => favorites.includes(spot.id)),
-    [favorites]
-  )
+  const favoriteSpots = useMemo(() => {
+    const bucket = new Map<string, Spot>()
+    ;[...selectedSpots, ...sampleSpots].forEach((spot) => {
+      if (favorites.includes(spot.id) && !bucket.has(spot.id)) {
+        bucket.set(spot.id, spot)
+      }
+    })
+    return Array.from(bucket.values())
+  }, [favorites, selectedSpots])
 
   const notifications = useMemo(
     () => [
@@ -163,6 +180,17 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
     favorites: favorites.length,
     spots: selectedSpots.length,
   }
+  const metadataDisplayName = user?.user_metadata?.display_name
+  const displayName =
+    typeof metadataDisplayName === "string" && metadataDisplayName.trim()
+      ? metadataDisplayName.trim()
+      : "旅行者"
+  const userEmail = user?.email || ""
+  const draftStatus = currentPlan
+    ? "已有当前草稿"
+    : selectedSpots.length > 0
+      ? `当前清单 ${selectedSpots.length} 个地点`
+      : "暂无草稿"
 
   const showFeedback = (message: string) => {
     setFeedback(message)
@@ -187,13 +215,21 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
     setActiveSubpage(target)
   }
 
-  const handleAction = (id: ActionId) => {
+  const handleAction = async (id: ActionId) => {
     if (id === "darkMode") {
       toggleDarkMode()
       return
     }
     if (id === "logout") {
-      showFeedback("退出登录功能开发中")
+      if (!isAuthenticated) {
+        router.push("/auth")
+        return
+      }
+      if (isSigningOut) return
+      setIsSigningOut(true)
+      const result = await signOut()
+      setIsSigningOut(false)
+      showFeedback(result.ok ? "已退出登录" : result.message)
       return
     }
     if (id === "language") {
@@ -247,7 +283,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
                 </div>
                 <AppIconButton
                   type="button"
-                  onClick={() => handleAction("settings")}
+              onClick={() => void handleAction("settings")}
                   variant="secondary"
                   size="md"
                   aria-label="打开设置"
@@ -260,11 +296,59 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
           />
         </div>
 
-        <div className="mt-3.5 grid grid-cols-3 gap-2">
-          <AppStatCard label="已保存行程" value={stats.trips} />
-          <AppStatCard label="收藏地点" value={stats.favorites} />
-          <AppStatCard label="当前清单" value={stats.spots} />
-        </div>
+        {authLoading ? (
+          <div className="mt-3.5 rounded-[var(--app-radius-md)] bg-white/70 px-3 py-3 text-sm text-[var(--app-text-secondary)]">
+            正在读取账号状态...
+          </div>
+        ) : isAuthenticated ? (
+          <>
+            <div className="mt-3.5 rounded-[var(--app-radius-md)] border border-white/75 bg-white/82 px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[var(--app-text-strong)]">
+                    {displayName}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-[var(--app-text-secondary)]">
+                    {userEmail}
+                  </p>
+                </div>
+                <AppTag tone="success">已登录</AppTag>
+              </div>
+              <p className="mt-2 text-xs text-[var(--app-text-secondary)]">
+                当前草稿状态：{draftStatus}
+              </p>
+            </div>
+            <div className="mt-3.5 grid grid-cols-3 gap-2">
+              <AppStatCard label="已保存行程" value={stats.trips} />
+              <AppStatCard label="收藏地点" value={stats.favorites} />
+              <AppStatCard label="当前清单" value={stats.spots} />
+            </div>
+          </>
+        ) : (
+          <div className="mt-3.5 space-y-3 rounded-[var(--app-radius-md)] border border-white/75 bg-white/82 px-3 py-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--app-text-strong)]">
+                登录后同步你的旅行方案
+              </p>
+              <p className="mt-1 text-xs leading-5 text-[var(--app-text-secondary)]">
+                收藏地点、行程草稿和已保存方案会安全同步到云端。
+              </p>
+            </div>
+            <AppButton
+              type="button"
+              size="md"
+              className="w-full"
+              onClick={() => router.push("/auth")}
+            >
+              登录 / 注册
+            </AppButton>
+            <div className="grid grid-cols-3 gap-2">
+              <AppStatCard label="本地行程" value={stats.trips} />
+              <AppStatCard label="本地收藏" value={stats.favorites} />
+              <AppStatCard label="当前清单" value={stats.spots} />
+            </div>
+          </div>
+        )}
       </AppCard>
 
       <section className="space-y-3">
@@ -276,7 +360,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
         <div className="grid grid-cols-2 gap-2.5">
           <button
             type="button"
-            onClick={() => handleAction("favorites")}
+            onClick={() => void handleAction("favorites")}
             className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
           >
             <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color:rgba(183,91,80,0.14)] text-[var(--app-error)]">
@@ -287,7 +371,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
           </button>
           <button
             type="button"
-            onClick={() => handleAction("calendar")}
+            onClick={() => void handleAction("calendar")}
             className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
           >
             <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color:rgba(108,131,118,0.14)] text-[var(--app-info)]">
@@ -298,7 +382,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
           </button>
           <button
             type="button"
-            onClick={() => handleAction("footprint")}
+            onClick={() => void handleAction("footprint")}
             className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
           >
             <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--app-brand-soft)] text-[var(--app-brand)]">
@@ -309,7 +393,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
           </button>
           <button
             type="button"
-            onClick={() => handleAction("notification")}
+            onClick={() => void handleAction("notification")}
             className="card-hover rounded-[var(--app-radius-md)] border border-[var(--app-line)] bg-[var(--app-surface-elevated)] p-3 text-left"
           >
             <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--app-surface-muted)] text-[var(--app-text-primary)]">
@@ -364,7 +448,7 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
                   "w-full px-4 py-3.5 text-left transition-colors hover:bg-[var(--app-surface)]",
                   index !== MENU_ITEMS.length - 1 && "border-b border-[var(--app-line)]"
                 )}
-                onClick={() => handleAction(item.id)}
+                onClick={() => void handleAction(item.id)}
               >
                 <div className="flex items-center gap-3.5">
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--app-surface-muted)] text-[var(--app-text-primary)]">
@@ -405,13 +489,14 @@ export function ProfilePage({ onViewSpot, onOpenSavedPlan, onGoPlanner }: Profil
 
       <AppButton
         type="button"
-        onClick={() => handleAction("logout")}
-        variant="danger"
+        onClick={() => void handleAction("logout")}
+        variant={isAuthenticated ? "danger" : "primary"}
         size="lg"
         className="w-full"
+        disabled={authLoading || isSigningOut}
       >
         <LogOut className="h-[1.125rem] w-[1.125rem]" />
-        退出登录
+        {isAuthenticated ? (isSigningOut ? "退出中..." : "退出登录") : "登录 / 注册"}
       </AppButton>
 
       <div className="text-center">

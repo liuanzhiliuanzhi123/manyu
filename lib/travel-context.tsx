@@ -6,9 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
+import { useAuth } from "@/lib/auth/use-auth"
 import { beijingSpotSeeds } from "@/lib/beijing-place-data"
 import type { TransitStep } from "@/lib/amap-route-utils"
 import type {
@@ -38,6 +40,7 @@ import {
   listSavedTrips,
   saveTrip as persistSavedTrip,
 } from "@/lib/travel-data/saved-trips"
+import { syncLocalTravelDataToSupabase } from "@/lib/travel-data/local-sync"
 import { upsertTripDraft } from "@/lib/travel-data/trip-drafts"
 
 export interface Spot {
@@ -373,6 +376,7 @@ function matchesLocalSpotSearch(spot: Spot, keyword: string) {
 }
 
 export function TravelProvider({ children }: { children: ReactNode }) {
+  const { user, isAuthenticated, loading: authLoading } = useAuth()
   const [selectedSpots, setSelectedSpots] = useState<Spot[]>([])
   const [savedPlans, setSavedPlans] = useState<TripPlan[]>([])
   const [currentPlanState, setCurrentPlanState] = useState<TripPlan | null>(null)
@@ -380,11 +384,15 @@ export function TravelProvider({ children }: { children: ReactNode }) {
   const [searchResults, setSearchResults] = useState<Spot[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [hasHydratedData, setHasHydratedData] = useState(false)
+  const [syncFeedback, setSyncFeedback] = useState("")
+  const lastSyncedUserId = useRef<string | null>(null)
 
   useEffect(() => {
+    if (authLoading) return
     let cancelled = false
 
     async function hydrateTravelData() {
+      setHasHydratedData(false)
       const [plansResult, placesResult] = await Promise.all([
         listSavedTrips(),
         listSavedPlaces(),
@@ -394,16 +402,14 @@ export function TravelProvider({ children }: { children: ReactNode }) {
       const plans = plansResult.data
       setSavedPlans(plans)
       const currentPlanId = loadCurrentPlanIdFromStorage()
-      if (currentPlanId) {
-        const matched = plans.find((item) => item.id === currentPlanId) || null
-        setCurrentPlanState(matched)
-      }
+      const matched = currentPlanId
+        ? plans.find((item) => item.id === currentPlanId) || null
+        : null
+      setCurrentPlanState(matched)
 
-      if (placesResult.data.length > 0) {
-        const normalizedPlaces = placesResult.data.map((spot) => sanitizeSpotInput(spot))
-        setSelectedSpots(normalizedPlaces)
-        setFavorites(normalizedPlaces.map((spot) => spot.id))
-      }
+      const normalizedPlaces = placesResult.data.map((spot) => sanitizeSpotInput(spot))
+      setSelectedSpots(normalizedPlaces)
+      setFavorites(normalizedPlaces.map((spot) => spot.id))
       setHasHydratedData(true)
     }
 
@@ -412,7 +418,53 @@ export function TravelProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authLoading, user?.id])
+
+  useEffect(() => {
+    if (authLoading) return
+    if (!isAuthenticated || !user?.id) {
+      lastSyncedUserId.current = null
+      return
+    }
+    if (lastSyncedUserId.current === user.id) return
+    lastSyncedUserId.current = user.id
+
+    let cancelled = false
+
+    async function syncLocalData() {
+      const result = await syncLocalTravelDataToSupabase()
+      if (cancelled) return
+
+      if (result.message) {
+        setSyncFeedback(result.message)
+        window.setTimeout(() => setSyncFeedback(""), 1800)
+      }
+      if (!result.ok || result.skipped) return
+
+      const [plansResult, placesResult] = await Promise.all([
+        listSavedTrips(),
+        listSavedPlaces(),
+      ])
+      if (cancelled) return
+
+      const plans = plansResult.data
+      const currentPlanId = loadCurrentPlanIdFromStorage()
+      const normalizedPlaces = placesResult.data.map((spot) => sanitizeSpotInput(spot))
+
+      setSavedPlans(plans)
+      setCurrentPlanState(
+        currentPlanId ? plans.find((item) => item.id === currentPlanId) || null : null
+      )
+      setSelectedSpots(normalizedPlaces)
+      setFavorites(normalizedPlaces.map((spot) => spot.id))
+    }
+
+    void syncLocalData()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading, isAuthenticated, user?.id])
 
   useEffect(() => {
     persistCurrentPlanIdToStorage(currentPlanState?.id || null)
@@ -554,8 +606,7 @@ export function TravelProvider({ children }: { children: ReactNode }) {
         .slice(0, 50)
         .map((spot) => sanitizeSpotInput(spot))
       setSearchResults(spots)
-    } catch (error) {
-      console.error("搜索失败:", error)
+    } catch {
       setSearchResults([])
     } finally {
       setIsSearching(false)
@@ -600,9 +651,16 @@ export function TravelProvider({ children }: { children: ReactNode }) {
   )
 
   return (
-    <TravelContext.Provider value={contextValue}>
-      {children}
-    </TravelContext.Provider>
+    <>
+      <TravelContext.Provider value={contextValue}>
+        {children}
+      </TravelContext.Provider>
+      {syncFeedback && (
+        <div className="fixed left-1/2 top-16 z-[80] -translate-x-1/2 rounded-[var(--app-radius-sm)] bg-[var(--app-text-strong)] px-4 py-2 text-sm text-white shadow-lg">
+          {syncFeedback}
+        </div>
+      )}
+    </>
   )
 }
 

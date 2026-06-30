@@ -15,7 +15,7 @@ function toJson(value: unknown): Json {
   return JSON.parse(JSON.stringify(value ?? {})) as Json
 }
 
-function readLocalTripDraft(): TripDraft | null {
+export function readLocalTripDraft(): TripDraft | null {
   if (!isBrowser()) return null
   try {
     const raw = window.localStorage.getItem(LOCAL_TRIP_DRAFT_KEY)
@@ -26,9 +26,13 @@ function readLocalTripDraft(): TripDraft | null {
   }
 }
 
-function writeLocalTripDraft(draft: TripDraft) {
+export function writeLocalTripDraft(draft: TripDraft) {
   if (!isBrowser()) return
-  window.localStorage.setItem(LOCAL_TRIP_DRAFT_KEY, JSON.stringify(draft))
+  try {
+    window.localStorage.setItem(LOCAL_TRIP_DRAFT_KEY, JSON.stringify(draft))
+  } catch {
+    // Local guest data is best-effort and must not break the page.
+  }
 }
 
 function removeLocalTripDraft() {

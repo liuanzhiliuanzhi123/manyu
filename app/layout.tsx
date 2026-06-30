@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
-import { Analytics } from '@vercel/analytics/next'
 import { AppPreferenceSync } from '@/components/travel/app-preference-sync'
+import { AuthProvider } from '@/components/travel/auth/auth-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
 
@@ -42,10 +42,11 @@ export default function RootLayout({
           enableSystem={false}
           storageKey="manyu-theme"
         >
-          <AppPreferenceSync />
-          {children}
+          <AuthProvider>
+            <AppPreferenceSync />
+            {children}
+          </AuthProvider>
         </ThemeProvider>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
   )

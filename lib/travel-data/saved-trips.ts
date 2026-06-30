@@ -12,6 +12,32 @@ import {
 import type { Json, SavedTrip, SavedTripUpdate, TripDay } from "@/lib/supabase/types"
 import type { TripPlan } from "@/lib/travel-context"
 
+function getPlanDataRecord(value: Json): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function toText(value: unknown) {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function isMatchingLocalTrip(row: SavedTrip, plan: TripPlan) {
+  const planData = getPlanDataRecord(row.plan_data)
+  const localId = toText(planData.id)
+  const localCreatedAt = toText(planData.createdAt)
+  const planId = toText(plan.id)
+  const planCreatedAt = toText(plan.createdAt)
+
+  if (planId && localId && planId === localId) return true
+  return Boolean(
+    row.title === plan.name &&
+      planCreatedAt &&
+      localCreatedAt &&
+      planCreatedAt === localCreatedAt
+  )
+}
+
 function upsertLocalSavedTrip(plan: TripPlan) {
   const plans = loadSavedPlansFromStorage()
   const index = plans.findIndex((item) => item.id === plan.id)
@@ -98,7 +124,21 @@ export async function saveTrip(plan: TripPlan): Promise<TravelDataResult<TripPla
   try {
     const context = await getTravelDataSupabaseContext()
     if (context.available) {
-      const mapped = mapTravelPlanToSavedTrip(plan, context.user.id)
+      let existingTripId: string | undefined
+      if (!isUuid(plan.id)) {
+        const { data: existingTrips, error: existingError } = await context.client
+          .from("saved_trips")
+          .select("*")
+          .eq("user_id", context.user.id)
+          .order("updated_at", { ascending: false })
+
+        if (existingError) throw existingError
+        existingTripId = (existingTrips || []).find((trip) =>
+          isMatchingLocalTrip(trip as SavedTrip, plan)
+        )?.id
+      }
+
+      const mapped = mapTravelPlanToSavedTrip(plan, context.user.id, existingTripId)
       const savedTripPayload = {
         ...mapped.savedTrip,
         id: isUuid(mapped.savedTrip.id) ? mapped.savedTrip.id : undefined,
