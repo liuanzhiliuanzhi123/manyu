@@ -10,11 +10,11 @@ function summarizeSpecialNeeds(specialNeeds: string[]) {
 
 export function buildPlannerSystemPrompt() {
   return [
-    "You are a strict Beijing travel planning decision engine.",
+    "你是北京旅行规划助手，也是严格的 JSON 决策引擎。",
+    "你必须只输出严格 JSON，不要输出 Markdown，不要输出解释文字。",
     "Only use place IDs from provided candidates.",
-    "Never invent new places, routes, opening hours, prices, or images.",
-    "You only decide ranking, inclusion, day grouping, meal and hotel choice, and explanations.",
-    "Output must be valid JSON only. No markdown and no prose outside JSON.",
+    "Never invent new places, routes, opening hours, prices, images, or non-Beijing destinations.",
+    "For scenic, food, and hotel items, include the candidate placeId when available.",
     "Respect constraints first: budget, pace, transport practicality, nearby food/hotel logic.",
     "If candidates are insufficient, keep the plan usable and add warnings.",
   ].join(" ")
@@ -46,47 +46,63 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
   }
 
   const outputContract = {
-    destination: "string",
-    totalDays: "number",
-    totalBudget: "number(optional)",
-    weatherSummary: "object(optional, copy weatherContext.summary when available)",
-    days: [
+    title: "北京智能行程",
+    city: "北京",
+    days: input.totalDays,
+    pace: "relaxed | balanced | intensive",
+    budgetEstimate: {
+      total: "number(optional)",
+      currency: "CNY",
+      notes: "string(optional)",
+    },
+    summary: "string(optional)",
+    weatherAdvice: {
+      summary: "string(optional)",
+      tags: ["string"],
+      suggestions: ["string"],
+    },
+    daysPlan: [
       {
-        day: "number(1-based)",
-        theme: "string",
-        districtSummary: "string(optional)",
-        weather: "object(optional, copy corresponding forecastByDay item when available)",
-        weatherAdvice: "string(optional, one concise weather response sentence)",
-        weatherTags: ["string(optional)"],
-        spots: [
+        dayIndex: "number(1-based)",
+        title: "string",
+        summary: "string(optional)",
+        weather: {
+          weather: "string(optional)",
+          temperature: "string(optional)",
+          advice: "string(optional)",
+        },
+        items: [
           {
-            placeId: "string(candidate attraction id only)",
-            stayMinutes: "number(optional)",
+            type: "scenic | food | hotel | transit | rest | note",
+            placeId: "string(candidate id for scenic/food/hotel)",
+            name: "string(candidate name only)",
+            address: "string(optional, candidate address only)",
+            district: "string(optional)",
+            startTime: "HH:mm(optional)",
+            endTime: "HH:mm(optional)",
+            durationMinutes: "number(optional)",
             reason: "string(optional)",
+            tips: "string(optional)",
+            lat: "number(optional, candidate lat only)",
+            lng: "number(optional, candidate lng only)",
+            estimatedCost: "number(optional)",
+            transportToNext: {
+              mode: "walking | transit | driving | mixed",
+              durationMinutes: "number(optional, estimate only)",
+              distanceKm: "number(optional, estimate only)",
+              summary: "string(optional)",
+            },
           },
         ],
-        lunch: {
-          placeId: "string(candidate restaurant id optional)",
-          area: "string(optional)",
-          reason: "string(optional)",
-        },
-        dinner: {
-          placeId: "string(candidate restaurant id optional)",
-          area: "string(optional)",
-          reason: "string(optional)",
-        },
-        hotel: {
-          placeId: "string(candidate hotel id optional)",
-          area: "string(optional)",
-          reason: "string(optional)",
-        },
-        routeLegIds: ["string(optional)"],
-        dayBudget: "number(optional)",
-        warnings: ["string"],
       },
     ],
-    droppedPlaceIds: ["string"],
-    explanations: ["string"],
+    foodAndStay: {
+      lunchSuggestions: [],
+      dinnerSuggestions: [],
+      hotelSuggestions: [],
+    },
+    riskWarnings: ["string"],
+    savePayload: {},
   }
 
   const content = {
@@ -94,7 +110,9 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
     preferences: preferenceSummary,
     constraints: {
       useCandidateIdsOnly: true,
+      outputMustContainJsonOnly: true,
       noFactFabrication: true,
+      beijingOnly: true,
       optimizeForPreferences: true,
       keepTransportPracticality: true,
       keepNearbyFoodHotelLogic: true,
@@ -125,7 +143,7 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
 
 export function buildPlannerRepairPrompt(rawOutput: string, validationIssues: string[]) {
   return JSON.stringify({
-    task: "Repair invalid planner JSON.",
+    task: "Repair invalid DeepSeek planner JSON.",
     instructions: [
       "Keep all facts candidate-bound.",
       "Do not add unknown place IDs.",

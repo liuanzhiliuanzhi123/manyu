@@ -1,24 +1,78 @@
-﻿import { NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { normalizePlannerApiRequest, toPlannerApiError } from "@/lib/planner/planner-api-contract"
+import { checkPlannerRateLimit } from "@/lib/planner/rate-limit"
 import { runPlannerDecision } from "@/lib/planner-orchestrator"
+import { createSupabaseRouteClient } from "@/lib/supabase/server"
+
+function getClientIp(request: Request) {
+  const forwarded = request.headers.get("x-forwarded-for") || ""
+  const firstForwarded = forwarded.split(",")[0]?.trim()
+  return firstForwarded || request.headers.get("x-real-ip") || "anonymous"
+}
+
+async function getRateLimitKey(request: Request) {
+  try {
+    const supabase = await createSupabaseRouteClient()
+    if (supabase.available) {
+      const { data } = await supabase.client.auth.getUser()
+      if (data.user?.id) return `user:${data.user.id}`
+    }
+  } catch {
+    // Session lookup is best-effort; fall back to IP-based limiting.
+  }
+  return `ip:${getClientIp(request)}`
+}
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "method_not_allowed",
+      message: "Planner API only accepts POST requests.",
+    },
+    { status: 405 }
+  )
+}
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json()
-    const result = await runPlannerDecision(payload)
-    return NextResponse.json({ ok: true, data: result })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Planner request failed"
-    const isBadRequest =
-      message.includes("Required") ||
-      message.includes("Invalid") ||
-      message.includes("expected")
+    const limit = checkPlannerRateLimit(await getRateLimitKey(request))
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "rate_limited",
+          message: "请求过于频繁，请稍后再试。",
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000))),
+          },
+        }
+      )
+    }
 
+    const payload = await request.json()
+    const plannerRequest = normalizePlannerApiRequest(payload)
+    const result = await runPlannerDecision(plannerRequest)
+    return NextResponse.json({
+      ok: true,
+      data: result,
+      meta: {
+        source: result.source,
+        fallback: result.source === "fallback",
+      },
+    })
+  } catch (error) {
+    const normalized = toPlannerApiError(error)
     return NextResponse.json(
       {
         ok: false,
-        message,
+        code: normalized.code,
+        message: normalized.message,
       },
-      { status: isBadRequest ? 400 : 500 }
+      { status: normalized.status }
     )
   }
 }

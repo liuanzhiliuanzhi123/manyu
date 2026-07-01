@@ -22,7 +22,7 @@ export type TransportSuggestionMode =
   | "train"
   | "flight"
 
-export type PlannerEngineMode = "qwen" | "fallback"
+export type PlannerEngineMode = "deepseek" | "fallback"
 
 export type PlannerCandidateType = "attraction" | "restaurant" | "hotel"
 

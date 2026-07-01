@@ -1,8 +1,9 @@
 ﻿import "server-only"
 
-import { hasDashscopeApiKey } from "@/lib/aliyun-qwen-client"
-import { generatePlanByQwen } from "@/lib/llm-planner"
+import { hasDeepSeekApiKey } from "@/lib/planner/deepseek-client"
+import { generatePlanByDeepSeek } from "@/lib/planner/deepseek-planner"
 import { buildFallbackGeneratedPlan } from "@/lib/planner-fallback"
+import { filterBeijingPlannerCandidates } from "@/lib/planner/beijing-planner-context"
 import { buildWeatherPlanContext, getWeatherByCity } from "@/lib/weather-service"
 import {
   plannerDecisionRequestSchema,
@@ -294,10 +295,19 @@ export async function runPlannerDecision(
   }
 
   if (!isBeijingInput(parsedWithWeather)) {
-    return buildFallbackDecision(parsedWithWeather, ["第三阶段当前仅支持北京，已降级为规则方案。"])
+    return buildFallbackDecision(parsedWithWeather, ["第四阶段当前仅支持北京，已降级为规则方案。"])
   }
 
-  const prepared = applyHardRules(parsedWithWeather)
+  const beijingOnlyInput: PlannerDecisionRequestInput = {
+    ...parsedWithWeather,
+    city: "北京",
+    province: "北京",
+    attractions: filterBeijingPlannerCandidates(parsedWithWeather.attractions),
+    restaurants: filterBeijingPlannerCandidates(parsedWithWeather.restaurants),
+    hotels: filterBeijingPlannerCandidates(parsedWithWeather.hotels),
+  }
+
+  const prepared = applyHardRules(beijingOnlyInput)
   if (weatherSummary.source === "fallback") {
     prepared.warnings.unshift("天气数据暂不可用，本方案按常规出行条件生成。")
   } else {
@@ -308,23 +318,22 @@ export async function runPlannerDecision(
     return buildFallbackDecision(prepared.input, [...prepared.warnings, "可用景点候选不足，已使用规则兜底。"])
   }
 
-  if (!hasDashscopeApiKey()) {
-    return buildFallbackDecision(prepared.input, [...prepared.warnings, "未配置 DASHSCOPE_API_KEY，已使用基础规划方案。"])
+  if (!hasDeepSeekApiKey()) {
+    return buildFallbackDecision(prepared.input, [...prepared.warnings, "未配置 DEEPSEEK_API_KEY，已使用基础规划方案。"])
   }
 
   try {
-    const qwen = await generatePlanByQwen(prepared.input)
+    const deepseek = await generatePlanByDeepSeek(prepared.input)
     const result: PlannerDecisionResultOutput = {
-      source: "qwen",
-      plan: qwen.plan,
-      warnings: [...prepared.warnings, ...qwen.warnings],
+      source: "deepseek",
+      plan: deepseek.plan,
+      warnings: [...prepared.warnings, ...deepseek.warnings],
     }
     return plannerDecisionResultSchema.parse(result)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Qwen planner failed"
+  } catch {
     return buildFallbackDecision(prepared.input, [
       ...prepared.warnings,
-      `Qwen 规划异常，已降级为基础规划方案：${message}`,
+      "智能规划暂时不可用，已为你生成基础北京行程。",
     ])
   }
 }

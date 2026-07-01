@@ -347,10 +347,14 @@ async function requestPlannerDecision(payload: PlannerDecisionRequest): Promise<
   const result = (await response.json()) as {
     ok: boolean
     data?: PlannerDecisionResult
+    code?: string
     message?: string
   }
   if (!response.ok || !result.ok || !result.data) {
-    throw new Error(result.message || "规划决策请求失败")
+    if (response.status === 429 || result.code === "rate_limited") {
+      throw new Error("请求过于频繁，请稍后再试。")
+    }
+    throw new Error("智能规划暂时不可用，已为你生成基础北京行程。")
   }
   return result.data
 }
@@ -1387,10 +1391,10 @@ export function AIPlannnerPage({
 
       const notices = [...itineraryResult.notices]
       if (plannerRequestFailed) {
-        notices.unshift(`智能决策层不可用，已降级为基础规则方案：${plannerRequestFailed}`)
+        notices.unshift(plannerRequestFailed)
       }
       if (plannerDecision?.source === "fallback") {
-        notices.unshift("当前已使用基础规划方案（规则引擎），可配置Qwen后获得偏好增强决策。")
+        notices.unshift("当前已使用基础规划方案（规则引擎），配置 DeepSeek 后可获得偏好增强决策。")
       }
       if (plannerDecision?.warnings?.length) {
         notices.push(...plannerDecision.warnings)
