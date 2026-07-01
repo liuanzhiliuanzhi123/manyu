@@ -62,6 +62,7 @@ export async function POST(request: Request) {
       meta: {
         source: result.source,
         fallback: result.source === "fallback",
+        preferenceTrace: result.preferenceTrace,
       },
     })
   } catch (error) {

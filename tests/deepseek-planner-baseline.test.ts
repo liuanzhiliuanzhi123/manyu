@@ -17,6 +17,14 @@ import {
   getPlannerRuntimeMode,
   normalizePlannerApiRequest,
 } from "../lib/planner/planner-api-contract"
+import {
+  buildPreferencePolicy,
+  buildPreferencePolicyFromRequest,
+} from "../lib/planner/preference-policy"
+import {
+  repairGeneratedPlanWithPolicy,
+  validateGeneratedPlanAgainstPolicy,
+} from "../lib/planner/plan-repair"
 import { checkRateLimit, type RateLimitState } from "../lib/planner/rate-limit"
 import { mapTravelPlanToSavedTrip } from "../lib/travel-data/mappers"
 import type { GeneratedPlan } from "../lib/planner-types"
@@ -187,7 +195,34 @@ describe("北京 MVP planner request constraints", () => {
     expect(request.totalDays).toBe(3)
     expect(request.pace).toBe("slow")
     expect(request.interests).toEqual(["历史人文"])
+    expect(request.structuredPreferences?.pace).toBe("relaxed")
+    expect(request.structuredPreferences?.specialNeeds).toContain("publicTransit")
     expect(request.manualPreferredPlaceIds).toEqual(["forbidden-city"])
+  })
+
+  it("normalizes structured preference payloads into legacy planner fields", () => {
+    const request = normalizePlannerApiRequest({
+      city: "北京",
+      days: 2,
+      pace: "balanced",
+      preferences: ["城市漫步"],
+      travelerGroup: "family",
+      interestTags: ["nature", "food"],
+      specialNeeds: ["kidFriendly", "lessWalking"],
+      budgetTier: "budget1000to3000",
+      transportPreference: "mixed",
+    })
+
+    expect(request.companions).toBe("family")
+    expect(request.pace).toBe("balanced")
+    expect(request.budgetRange).toBe("1000-3000")
+    expect(request.interests).toEqual(expect.arrayContaining(["自然风光", "美食打卡"]))
+    expect(request.specialNeeds).toEqual(expect.arrayContaining(["适合小孩", "少走路"]))
+    expect(request.structuredPreferences).toMatchObject({
+      travelerGroup: "family",
+      pace: "balanced",
+      budgetTier: "budget1000to3000",
+    })
   })
 
   it("drops selected places with explicit non-Beijing location hints", () => {
@@ -245,6 +280,117 @@ describe("北京 MVP planner request constraints", () => {
     const context = buildBeijingPlannerCandidates({ attractionLimit: 5 })
     expect(context.attractions.length).toBeGreaterThan(0)
     expect(context.attractions.every((item) => item.city === "北京")).toBe(true)
+  })
+})
+
+describe("preference policy and repair", () => {
+  it("downgrades unsafe conflict combinations while keeping a safe trace", () => {
+    const elderly = buildPreferencePolicy({
+      travelerGroup: "elderly",
+      pace: "intensive",
+      specialNeeds: ["elderlyFriendly"],
+      interestTags: ["history"],
+      days: 2,
+      budgetTier: "budget3000to5000",
+    })
+    expect(elderly.normalizedPreferences.effectivePace).toBe("relaxed")
+    expect(elderly.conflictWarnings.length).toBeGreaterThan(0)
+    expect(elderly.preferenceTrace).not.toHaveProperty("email")
+
+    const familyNight = buildPreferencePolicy({
+      travelerGroup: "family",
+      pace: "balanced",
+      specialNeeds: ["kidFriendly"],
+      interestTags: ["nightlife"],
+      days: 2,
+      budgetTier: "budget3000to5000",
+    })
+    expect(familyNight.conflictWarnings.join(" ")).toContain("亲子")
+
+    const budgetComfort = buildPreferencePolicy({
+      travelerGroup: "friends",
+      pace: "balanced",
+      specialNeeds: ["lowBudget", "hotelComfort"],
+      interestTags: ["food"],
+      days: 2,
+      budgetTier: "over10000",
+    })
+    expect(budgetComfort.conflictWarnings.join(" ")).toContain("低预算")
+  })
+
+  it("repairs sparse model plans to satisfy daily preference constraints", () => {
+    const request = normalizePlannerApiRequest({
+      city: "北京",
+      days: 1,
+      pace: "intensive",
+      interestTags: ["history", "food"],
+      specialNeeds: ["foodPriority"],
+      budgetTier: "budget3000to5000",
+    })
+    const policy = buildPreferencePolicyFromRequest(request)
+    const sparsePlan: GeneratedPlan = {
+      destination: "北京",
+      totalDays: 1,
+      days: [
+        {
+          day: 1,
+          theme: "模型少点位路线",
+          spots: [{ placeId: request.attractions[0].placeId }],
+        },
+      ],
+      droppedPlaceIds: [],
+      explanations: [],
+    }
+
+    const repaired = repairGeneratedPlanWithPolicy(sparsePlan, request, policy)
+    const errors = validateGeneratedPlanAgainstPolicy(repaired.plan, request, policy).filter(
+      (issue) => issue.level === "error"
+    )
+
+    expect(repaired.repairApplied).toBe(true)
+    expect(repaired.plan.days[0].spots.length).toBeGreaterThanOrEqual(3)
+    expect(repaired.plan.days[0].lunch?.placeId).toBeTruthy()
+    expect(repaired.plan.days[0].dinner?.placeId).toBeTruthy()
+    expect(repaired.plan.days[0].hotel?.placeId).toBeTruthy()
+    expect(errors).toEqual([])
+  })
+
+  it("keeps fallback plans inside the preference policy for key Beijing MVP combinations", () => {
+    const combinations = [
+      { travelerGroup: "friends", pace: "intensive", interestTags: ["history", "food"], specialNeeds: ["foodPriority"] },
+      { travelerGroup: "friends", pace: "relaxed", interestTags: ["citywalk"], specialNeeds: ["lessWalking"] },
+      { travelerGroup: "family", pace: "balanced", interestTags: ["familyFun", "nature"], specialNeeds: ["kidFriendly"] },
+      { travelerGroup: "elderly", pace: "balanced", interestTags: ["history"], specialNeeds: ["elderlyFriendly"] },
+      { travelerGroup: "friends", pace: "balanced", interestTags: ["museum"], specialNeeds: ["lowBudget"], budgetTier: "under1000" },
+      { travelerGroup: "couple", pace: "relaxed", interestTags: ["vacation"], specialNeeds: ["hotelComfort"], budgetTier: "over10000" },
+      { travelerGroup: "friends", pace: "intensive", interestTags: ["nightlife", "food"], specialNeeds: [] },
+      { travelerGroup: "solo", pace: "balanced", interestTags: ["citywalk"], specialNeeds: ["publicTransit"] },
+      { travelerGroup: "friends", pace: "balanced", interestTags: ["nature"], specialNeeds: ["driving"] },
+    ] as const
+
+    for (const preferences of combinations) {
+      const request = normalizePlannerApiRequest({
+        city: "北京",
+        days: 2,
+        structuredPreferences: {
+          days: 2,
+          budgetTier: "budget3000to5000",
+          ...preferences,
+        },
+      })
+      const policy = buildPreferencePolicyFromRequest(request)
+      const fallback = buildFallbackGeneratedPlan(request)
+      const errors = validateGeneratedPlanAgainstPolicy(fallback.plan, request, policy).filter(
+        (issue) => issue.level === "error"
+      )
+
+      expect(errors).toEqual([])
+      fallback.plan.days.forEach((day) => {
+        expect(day.spots.length).toBeGreaterThanOrEqual(
+          policy.hardConstraints.minMainActivitiesPerDay
+        )
+      })
+    }
   })
 })
 

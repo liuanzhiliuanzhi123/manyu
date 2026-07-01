@@ -15,6 +15,12 @@ import {
   type PlannerDecisionRequestInput,
   type PlannerDecisionResultOutput,
 } from "@/lib/planner-json-schema"
+import {
+  buildPreferencePolicyFromRequest,
+  getCandidatePolicyScore,
+  getLegacyFieldsFromPolicy,
+  type PreferencePolicy,
+} from "@/lib/planner/preference-policy"
 
 const REMOTE_DISTRICT_KEYWORDS = ["延庆", "怀柔", "密云", "平谷", "门头沟"]
 
@@ -28,12 +34,6 @@ function parseBudgetUpperBound(budgetRange: string) {
   const [minText, maxText] = budgetRange.split("-")
   const maxValue = Number((maxText || minText || "").replace(/[^\d]/g, ""))
   return Number.isFinite(maxValue) ? maxValue : Number.POSITIVE_INFINITY
-}
-
-function paceSpotLimit(pace: PlannerDecisionRequestInput["pace"]) {
-  if (pace === "fast") return 6
-  if (pace === "slow") return 3
-  return 4
 }
 
 function normalizeText(input?: string) {
@@ -107,9 +107,10 @@ function distanceMeters(
 function scoreAttraction(
   item: PlannerDecisionRequestInput["attractions"][number],
   input: PlannerDecisionRequestInput,
-  preferredSet: Set<string>
+  preferredSet: Set<string>,
+  policy: PreferencePolicy
 ) {
-  let score = 0
+  let score = getCandidatePolicyScore(item, policy)
   if (preferredSet.has(item.placeId)) score += 100
   if (Number.isFinite(item.rating)) score += (item.rating as number) * 10
   const text = `${item.name} ${(item.tags || []).join(" ")}`
@@ -158,7 +159,37 @@ function scoreAttraction(
   return score
 }
 
-function applyHardRules(input: PlannerDecisionRequestInput) {
+function withPolicyNormalizedFields(
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy
+): PlannerDecisionRequestInput {
+  const legacyFields = getLegacyFieldsFromPolicy(policy)
+  return {
+    ...input,
+    budgetRange: legacyFields.budgetRange,
+    companions: legacyFields.companions as PlannerDecisionRequestInput["companions"],
+    interests: legacyFields.interests,
+    pace: legacyFields.pace as PlannerDecisionRequestInput["pace"],
+    specialNeeds: legacyFields.specialNeeds,
+    structuredPreferences: {
+      travelerGroup: policy.normalizedPreferences.travelerGroup,
+      interestTags: policy.normalizedPreferences.interestTags,
+      pace: policy.normalizedPreferences.effectivePace,
+      specialNeeds: policy.normalizedPreferences.specialNeeds,
+      days: policy.normalizedPreferences.days,
+      budgetTier: policy.normalizedPreferences.budgetTier,
+    },
+  }
+}
+
+function withPreferenceTrace(policy: PreferencePolicy, repairApplied: boolean) {
+  return {
+    ...policy.preferenceTrace,
+    repairApplied,
+  }
+}
+
+function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePolicy) {
   const warnings: string[] = []
   const budgetUpper = parseBudgetUpperBound(input.budgetRange)
   const preferredSet = new Set(input.manualPreferredPlaceIds || [])
@@ -173,9 +204,16 @@ function applyHardRules(input: PlannerDecisionRequestInput) {
     return (item.price as number) <= Math.max(120, budgetUpper * 0.12)
   })
 
-  const maxAttractions = Math.max(input.totalDays * paceSpotLimit(input.pace), input.totalDays * 2)
+  const maxAttractions = Math.max(
+    input.totalDays * policy.hardConstraints.maxMainActivitiesPerDay,
+    input.totalDays * policy.hardConstraints.minMainActivitiesPerDay
+  )
   const rankedAttractions = [...budgetFilteredAttractions]
-    .sort((a, b) => scoreAttraction(b, input, preferredSet) - scoreAttraction(a, input, preferredSet))
+    .sort(
+      (a, b) =>
+        scoreAttraction(b, input, preferredSet, policy) -
+        scoreAttraction(a, input, preferredSet, policy)
+    )
     .slice(0, maxAttractions)
 
   if (rawAttractions.length > rankedAttractions.length) {
@@ -256,15 +294,7 @@ function applyHardRules(input: PlannerDecisionRequestInput) {
     warnings.push("酒店候选不足，后续将使用基础规则兜底。")
   }
 
-  if (input.pace === "fast" && input.specialNeeds.includes("少走路")) {
-    warnings.push("你选择了特种兵式和少走路，系统会自动平衡日程密度。")
-  }
-  if (
-    input.specialNeeds.includes("低预算优先") &&
-    input.specialNeeds.includes("酒店舒适优先")
-  ) {
-    warnings.push("你选择了低预算优先和酒店舒适优先，系统会做折中优化。")
-  }
+  warnings.push(...policy.conflictWarnings)
 
   return {
     input: {
@@ -278,12 +308,17 @@ function applyHardRules(input: PlannerDecisionRequestInput) {
   }
 }
 
-function buildFallbackDecision(input: PlannerDecisionRequestInput, warnings: string[]) {
+function buildFallbackDecision(
+  input: PlannerDecisionRequestInput,
+  warnings: string[],
+  policy: PreferencePolicy
+) {
   const fallback = buildFallbackGeneratedPlan(input)
   const result: PlannerDecisionResultOutput = {
     source: "fallback",
     plan: fallback.plan,
     warnings: [...warnings, ...fallback.warnings],
+    preferenceTrace: withPreferenceTrace(policy, true),
   }
   return plannerDecisionResultSchema.parse(result)
 }
@@ -334,7 +369,12 @@ export async function runPlannerDecision(
   }
 
   if (!isBeijingInput(parsedWithWeather)) {
-    return buildFallbackDecision(parsedWithWeather, ["第四阶段当前仅支持北京，已降级为规则方案。"])
+    const policy = buildPreferencePolicyFromRequest(parsedWithWeather)
+    return buildFallbackDecision(
+      withPolicyNormalizedFields(parsedWithWeather, policy),
+      ["第四阶段当前仅支持北京，已降级为规则方案。"],
+      policy
+    )
   }
 
   const beijingOnlyInput: PlannerDecisionRequestInput = {
@@ -346,7 +386,9 @@ export async function runPlannerDecision(
     hotels: filterBeijingPlannerCandidates(parsedWithWeather.hotels),
   }
 
-  const prepared = applyHardRules(beijingOnlyInput)
+  const policy = buildPreferencePolicyFromRequest(beijingOnlyInput)
+  const policyInput = withPolicyNormalizedFields(beijingOnlyInput, policy)
+  const prepared = applyHardRules(policyInput, policy)
   if (weatherSummary.source === "fallback") {
     prepared.warnings.unshift("天气数据暂不可用，本方案按常规出行条件生成。")
   } else {
@@ -354,11 +396,19 @@ export async function runPlannerDecision(
   }
 
   if (prepared.input.attractions.length === 0) {
-    return buildFallbackDecision(prepared.input, [...prepared.warnings, "可用景点候选不足，已使用规则兜底。"])
+    return buildFallbackDecision(
+      prepared.input,
+      [...prepared.warnings, "可用景点候选不足，已使用规则兜底。"],
+      policy
+    )
   }
 
   if (!hasDeepSeekApiKey()) {
-    return buildFallbackDecision(prepared.input, [...prepared.warnings, "未配置 DEEPSEEK_API_KEY，已使用基础规划方案。"])
+    return buildFallbackDecision(
+      prepared.input,
+      [...prepared.warnings, "未配置智能规划密钥，已使用基础规划方案。"],
+      policy
+    )
   }
 
   try {
@@ -367,6 +417,7 @@ export async function runPlannerDecision(
       source: "deepseek",
       plan: deepseek.plan,
       warnings: [...prepared.warnings, ...deepseek.warnings],
+      preferenceTrace: withPreferenceTrace(policy, deepseek.repairApplied),
     }
     return plannerDecisionResultSchema.parse(result)
   } catch (error) {
@@ -374,6 +425,6 @@ export async function runPlannerDecision(
     return buildFallbackDecision(prepared.input, [
       ...prepared.warnings,
       "智能规划暂时不可用，已为你生成基础北京行程。",
-    ])
+    ], policy)
   }
 }

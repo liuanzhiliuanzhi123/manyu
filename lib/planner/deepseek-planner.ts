@@ -10,6 +10,11 @@ import {
   buildPlannerSystemPrompt,
   buildPlannerUserPrompt,
 } from "@/lib/planner-prompts"
+import { buildPreferencePolicyFromRequest, type PreferencePolicy } from "@/lib/planner/preference-policy"
+import {
+  repairGeneratedPlanWithPolicy,
+  validateGeneratedPlanAgainstPolicy,
+} from "@/lib/planner/plan-repair"
 import type {
   GeneratedPlan,
   GeneratedPlanDay,
@@ -20,6 +25,7 @@ import type {
 interface LlmPlannerResult {
   plan: GeneratedPlan
   warnings: string[]
+  repairApplied: boolean
 }
 
 type DeepSeekPlanItem = DeepSeekGeneratedPlan["daysPlan"][number]["items"][number]
@@ -28,12 +34,6 @@ type CandidateType = "attraction" | "restaurant" | "hotel"
 interface CandidateLookup {
   byId: Record<CandidateType, Map<string, PlannerCandidate>>
   byName: Record<CandidateType, Map<string, PlannerCandidate>>
-}
-
-function getPaceMaxPerDay(pace: PlannerDecisionRequestInput["pace"]) {
-  if (pace === "fast") return 6
-  if (pace === "slow") return 3
-  return 4
 }
 
 function normalizeText(input?: string) {
@@ -126,22 +126,24 @@ function getDayBudget(items: DeepSeekPlanItem[]) {
 
 function mapDeepSeekPlanToGeneratedPlan(
   rawPlan: DeepSeekGeneratedPlan,
-  input: PlannerDecisionRequestInput
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy
 ): { plan: GeneratedPlan; warnings: string[] } {
   const lookup = buildLookup(input)
   const warnings: string[] = []
   const usedSpotIds = new Set<string>()
-  const maxPerDay = getPaceMaxPerDay(input.pace)
+  const maxPerDay = policy.hardConstraints.maxMainActivitiesPerDay
 
   const dayMap = new Map(rawPlan.daysPlan.map((day) => [day.dayIndex, day]))
   const days: GeneratedPlanDay[] = Array.from({ length: input.totalDays }, (_, index) => {
     const dayNumber = index + 1
     const sourceDay = dayMap.get(dayNumber)
     if (!sourceDay) {
-      throw new Error(`DeepSeek output missing day ${dayNumber}.`)
+      warnings.push(`模型未返回第 ${dayNumber} 天，已交由偏好补齐器处理。`)
     }
 
-    const scenicItems = sourceDay.items.filter((item) => item.type === "scenic")
+    const sourceItems = sourceDay?.items || []
+    const scenicItems = sourceItems.filter((item) => item.type === "scenic")
     const seen = new Set<string>()
     const scenicPairs = scenicItems
       .map((item) => ({ item, candidate: findCandidate(item, "attraction", lookup) }))
@@ -162,8 +164,8 @@ function mapDeepSeekPlanToGeneratedPlan(
     const selectedScenicPairs = scenicPairs.slice(0, maxPerDay)
     selectedScenicPairs.forEach((pair) => usedSpotIds.add(pair.candidate.placeId))
 
-    const foodItems = sourceDay.items.filter((item) => item.type === "food")
-    const hotelItem = sourceDay.items.find((item) => item.type === "hotel")
+    const foodItems = sourceItems.filter((item) => item.type === "food")
+    const hotelItem = sourceItems.find((item) => item.type === "hotel")
     const lunch = toSuggestion(foodItems[0], "restaurant", lookup)
     const dinner = toSuggestion(foodItems[1] || foodItems[0], "restaurant", lookup)
     const hotel = toSuggestion(hotelItem, "hotel", lookup)
@@ -182,11 +184,11 @@ function mapDeepSeekPlanToGeneratedPlan(
 
     return {
       day: dayNumber,
-      theme: normalizeText(sourceDay.title) || `第${dayNumber}天`,
+      theme: normalizeText(sourceDay?.title) || `第${dayNumber}天`,
       districtSummary: districtSummary || undefined,
       weather: dayWeather,
       weatherAdvice:
-        normalizeText(sourceDay.weather?.advice) ||
+        normalizeText(sourceDay?.weather?.advice) ||
         dayWeather?.advice ||
         normalizeText(rawPlan.weatherAdvice?.summary) ||
         undefined,
@@ -201,13 +203,13 @@ function mapDeepSeekPlanToGeneratedPlan(
       lunch,
       dinner,
       hotel,
-      dayBudget: getDayBudget(sourceDay.items),
+      dayBudget: getDayBudget(sourceItems),
       warnings: dayWarnings.length > 0 ? dayWarnings : undefined,
     }
   })
 
   if (days.some((day) => day.spots.length === 0)) {
-    throw new Error("DeepSeek output did not include valid Beijing attractions for every day.")
+    warnings.push("模型部分日期未返回有效北京景点，已交由偏好补齐器处理。")
   }
 
   const droppedPlaceIds = input.attractions
@@ -239,7 +241,8 @@ function mapDeepSeekPlanToGeneratedPlan(
 
 function sanitizePlanAgainstCandidates(
   plan: GeneratedPlan,
-  input: PlannerDecisionRequestInput
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy
 ): { plan: GeneratedPlan; warnings: string[] } {
   const warnings: string[] = []
 
@@ -247,7 +250,7 @@ function sanitizePlanAgainstCandidates(
   const restaurantIdSet = new Set(input.restaurants.map((item) => item.placeId))
   const hotelIdSet = new Set(input.hotels.map((item) => item.placeId))
 
-  const maxPerDay = getPaceMaxPerDay(input.pace)
+  const maxPerDay = policy.hardConstraints.maxMainActivitiesPerDay
   const days = plan.days.map((sourceDay) => {
     const seenSpotIds = new Set<string>()
     const spots = sourceDay.spots
@@ -300,9 +303,42 @@ function sanitizePlanAgainstCandidates(
   }
 }
 
+function finalizePlanAgainstPolicy(
+  plan: GeneratedPlan,
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy,
+  warnings: string[],
+  repairApplied: boolean
+): LlmPlannerResult {
+  const sanitized = sanitizePlanAgainstCandidates(plan, input, policy)
+  const repaired = repairGeneratedPlanWithPolicy(sanitized.plan, input, policy)
+  const issues = validateGeneratedPlanAgainstPolicy(repaired.plan, input, policy)
+  const blockingIssues = issues.filter((issue) => issue.level === "error")
+
+  if (blockingIssues.length > 0) {
+    throw new Error(
+      `Preference policy validation failed: ${blockingIssues
+        .map((issue) => issue.message)
+        .join("；")}`
+    )
+  }
+
+  return {
+    plan: repaired.plan,
+    warnings: [
+      ...warnings,
+      ...sanitized.warnings,
+      ...repaired.warnings,
+      ...issues.filter((issue) => issue.level === "warning").map((issue) => issue.message),
+    ],
+    repairApplied: repairApplied || repaired.repairApplied,
+  }
+}
+
 export async function generatePlanByDeepSeek(
   input: PlannerDecisionRequestInput
 ): Promise<LlmPlannerResult> {
+  const policy = buildPreferencePolicyFromRequest(input)
   const systemPrompt = buildPlannerSystemPrompt()
   const userPrompt = buildPlannerUserPrompt(input)
 
@@ -318,12 +354,8 @@ export async function generatePlanByDeepSeek(
 
   try {
     const parsed = parseDeepSeekPlanJson(firstResponse.text)
-    const mapped = mapDeepSeekPlanToGeneratedPlan(parsed, input)
-    const sanitized = sanitizePlanAgainstCandidates(mapped.plan, input)
-    return {
-      plan: sanitized.plan,
-      warnings: [...mapped.warnings, ...sanitized.warnings],
-    }
+    const mapped = mapDeepSeekPlanToGeneratedPlan(parsed, input, policy)
+    return finalizePlanAgainstPolicy(mapped.plan, input, policy, mapped.warnings, false)
   } catch (error) {
     if (!(error instanceof Error)) {
       throw error
@@ -348,12 +380,13 @@ export async function generatePlanByDeepSeek(
     })
 
     const repairedParsed = parseDeepSeekPlanJson(repairedResponse.text)
-    const mapped = mapDeepSeekPlanToGeneratedPlan(repairedParsed, input)
-    const sanitized = sanitizePlanAgainstCandidates(mapped.plan, input)
-
-    return {
-      plan: sanitized.plan,
-      warnings: ["模型输出已修复一次后通过校验。", ...mapped.warnings, ...sanitized.warnings],
-    }
+    const mapped = mapDeepSeekPlanToGeneratedPlan(repairedParsed, input, policy)
+    return finalizePlanAgainstPolicy(
+      mapped.plan,
+      input,
+      policy,
+      ["模型输出已修复一次后通过校验。", ...mapped.warnings],
+      true
+    )
   }
 }

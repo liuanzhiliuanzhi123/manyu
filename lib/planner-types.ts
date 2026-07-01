@@ -7,6 +7,14 @@
   | "team"
 
 import type { DayWeather, WeatherPlanContext, WeatherSummary } from "@/lib/weather-types"
+import type {
+  BudgetTier,
+  InterestTag,
+  PreferencePace,
+  SpecialNeed,
+  StructuredPlannerPreferences,
+  TravelerGroup,
+} from "@/lib/planner/preference-types"
 
 export type PacePreference = "fast" | "balanced" | "slow"
 
@@ -105,6 +113,7 @@ export interface PlannerDecisionRequest {
   interests: string[]
   pace: PacePreference
   specialNeeds: string[]
+  structuredPreferences?: StructuredPlannerPreferences
   attractions: PlannerCandidate[]
   restaurants: PlannerCandidate[]
   hotels: PlannerCandidate[]
@@ -113,10 +122,24 @@ export interface PlannerDecisionRequest {
   weatherContext?: WeatherPlanContext
 }
 
+export interface PlannerPreferenceTrace {
+  travelerGroup: TravelerGroup
+  pace: PreferencePace
+  effectivePace: PreferencePace
+  minMainActivitiesPerDay: number
+  targetTotalItemsPerDay: string
+  budgetTier: BudgetTier
+  interestTags: InterestTag[]
+  specialNeeds: SpecialNeed[]
+  conflictWarnings: string[]
+  repairApplied: boolean
+}
+
 export interface PlannerDecisionResult {
   source: PlannerEngineMode
   plan: GeneratedPlan
   warnings: string[]
+  preferenceTrace?: PlannerPreferenceTrace
 }
 
 export interface TravelRequirement {

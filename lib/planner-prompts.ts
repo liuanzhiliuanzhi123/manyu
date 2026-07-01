@@ -1,5 +1,7 @@
 ﻿import type { PlannerDecisionRequestInput } from "@/lib/planner-json-schema"
 
+import { buildPreferencePolicyFromRequest } from "@/lib/planner/preference-policy"
+
 function summarizeInterests(interests: string[]) {
   return interests.length > 0 ? interests.join("、") : "无明确兴趣偏好"
 }
@@ -21,6 +23,7 @@ export function buildPlannerSystemPrompt() {
 }
 
 export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
+  const policy = buildPreferencePolicyFromRequest(input)
   const preferenceSummary = {
     destination: input.destination,
     city: input.city,
@@ -33,6 +36,7 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
     pace: input.pace,
     interests: summarizeInterests(input.interests),
     specialNeeds: summarizeSpecialNeeds(input.specialNeeds),
+    structuredPreferences: policy.normalizedPreferences,
     weatherContext: input.weatherContext
       ? {
           city: input.weatherContext.summary.city,
@@ -108,6 +112,24 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
   const content = {
     task: "Plan a Beijing itinerary with strict candidate-bound decisions.",
     preferences: preferenceSummary,
+    preferencePolicy: {
+      normalizedPreferences: policy.normalizedPreferences,
+      hardConstraints: policy.hardConstraints,
+      softPreferences: policy.softPreferences,
+      dailyRules: policy.dailyRules,
+      budgetRules: policy.budgetRules,
+      transportRules: policy.transportRules,
+      foodRules: policy.foodRules,
+      hotelRules: policy.hotelRules,
+      conflictWarnings: policy.conflictWarnings,
+      validationRules: [
+        `Each day must include at least ${policy.hardConstraints.minMainActivitiesPerDay} scenic/main activity items.`,
+        `Each day target total scenic/main activity items: ${policy.hardConstraints.targetTotalItemsPerDay}.`,
+        "Each day must include lunch, dinner, and hotel suggestions from candidates when candidates are available.",
+        "If pace is intensive, never return only one or two scenic/main activity items for a day.",
+        "If lessWalking or elderlyFriendly is present, prefer same-district or adjacent-district clustering.",
+      ],
+    },
     constraints: {
       useCandidateIdsOnly: true,
       outputMustContainJsonOnly: true,

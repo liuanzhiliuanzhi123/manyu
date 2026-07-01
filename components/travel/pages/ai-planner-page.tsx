@@ -40,6 +40,14 @@ import { RecommendedPoiSection } from "@/components/travel/recommended-poi-secti
 import { RequirementPicker } from "@/components/travel/requirement-picker"
 import { MobileSheet } from "@/components/travel/mobile-sheet"
 import { getHotelRecommendations } from "@/lib/normalized-data"
+import {
+  legacyPaceToPreference,
+  normalizeBudgetTier,
+  normalizeInterestTag,
+  normalizeSpecialNeed,
+  normalizeTravelerGroup,
+  type StructuredPlannerPreferences,
+} from "@/lib/planner/preference-types"
 import { getCitiesByProvince, RECOMMENDED_CITY_GROUPS } from "@/lib/planner-city-data"
 import {
   detectCityConflict,
@@ -131,6 +139,24 @@ const DEFAULT_REQUIREMENT: TravelRequirement = {
   interests: ["历史人文", "美食打卡"],
   pace: "balanced",
   specialNeeds: [],
+}
+
+function buildStructuredPreferences(requirement: TravelRequirement): StructuredPlannerPreferences {
+  const days = Math.max(1, Math.min(5, Math.round(requirement.days))) as NonNullable<
+    StructuredPlannerPreferences["days"]
+  >
+  return {
+    travelerGroup: normalizeTravelerGroup(requirement.companions),
+    interestTags: requirement.interests
+      .map((interest) => normalizeInterestTag(interest))
+      .filter((interest): interest is NonNullable<typeof interest> => Boolean(interest)),
+    pace: legacyPaceToPreference(requirement.pace || "balanced"),
+    specialNeeds: (requirement.specialNeeds || [])
+      .map((need) => normalizeSpecialNeed(need))
+      .filter((need): need is NonNullable<typeof need> => Boolean(need)),
+    days,
+    budgetTier: normalizeBudgetTier(requirement.budgetRange),
+  }
 }
 
 const COMPANION_LABEL: Record<TravelRequirement["companions"], string> = {
@@ -1308,6 +1334,7 @@ export function AIPlannnerPage({
         interests: requirement.interests,
         pace: requirement.pace || "balanced",
         specialNeeds: requirement.specialNeeds || [],
+        structuredPreferences: buildStructuredPreferences(requirement),
         attractions: attractionCandidates.map((spot) => toPlannerCandidate(spot)),
         restaurants: restaurantCandidateSpots.map((spot) => toPlannerCandidate(spot)),
         hotels: hotelCandidateSpots.map((spot) => toPlannerCandidate(spot)),
@@ -1432,6 +1459,7 @@ export function AIPlannnerPage({
         generationSource,
         plannerWarnings: notices.map((message) => ({ level: "info", message })),
         plannerEngineMode: plannerDecision?.source || "fallback",
+        preferenceTrace: plannerDecision?.preferenceTrace,
         generatedPlan: plannerDecision?.plan,
         planExplanations: plannerDecision?.plan.explanations || [],
         planMode: "ai_original",

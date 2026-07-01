@@ -1,4 +1,11 @@
 import { z } from "zod"
+import {
+  BUDGET_TIERS,
+  INTEREST_TAGS,
+  PREFERENCE_PACES,
+  SPECIAL_NEEDS,
+  TRAVELER_GROUPS,
+} from "@/lib/planner/preference-types"
 
 const candidateTypeSchema = z.enum(["attraction", "restaurant", "hotel"])
 
@@ -87,6 +94,34 @@ export const plannerRouteHintSchema = z.object({
     .optional(),
 }).strict()
 
+const structuredPlannerPreferencesSchema = z.object({
+  travelerGroup: z.enum(TRAVELER_GROUPS).optional(),
+  interestTags: z.array(z.enum(INTEREST_TAGS)).max(16).optional(),
+  pace: z.enum(PREFERENCE_PACES).optional(),
+  specialNeeds: z.array(z.enum(SPECIAL_NEEDS)).max(16).optional(),
+  days: z.union([
+    z.literal(1),
+    z.literal(2),
+    z.literal(3),
+    z.literal(4),
+    z.literal(5),
+  ]).optional(),
+  budgetTier: z.enum(BUDGET_TIERS).optional(),
+}).strict()
+
+const plannerPreferenceTraceSchema = z.object({
+  travelerGroup: z.enum(TRAVELER_GROUPS),
+  pace: z.enum(PREFERENCE_PACES),
+  effectivePace: z.enum(PREFERENCE_PACES),
+  minMainActivitiesPerDay: z.number().int().positive(),
+  targetTotalItemsPerDay: z.string().min(1),
+  budgetTier: z.enum(BUDGET_TIERS),
+  interestTags: z.array(z.enum(INTEREST_TAGS)),
+  specialNeeds: z.array(z.enum(SPECIAL_NEEDS)),
+  conflictWarnings: z.array(z.string()),
+  repairApplied: z.boolean(),
+}).strict()
+
 export const generatedPlanSpotSchema = z.object({
   placeId: z.string().min(1),
   arrivalTime: z.string().optional(),
@@ -141,6 +176,7 @@ export const plannerDecisionRequestSchema = z.object({
   interests: z.array(z.string()).max(16),
   pace: z.enum(["fast", "balanced", "slow"]),
   specialNeeds: z.array(z.string()).max(16),
+  structuredPreferences: structuredPlannerPreferencesSchema.optional(),
   attractions: z.array(plannerCandidateSchema).max(40),
   restaurants: z.array(plannerCandidateSchema).max(80),
   hotels: z.array(plannerCandidateSchema).max(60),
@@ -153,6 +189,7 @@ export const plannerDecisionResultSchema = z.object({
   source: z.enum(["deepseek", "fallback"]),
   plan: generatedPlanSchema,
   warnings: z.array(z.string()),
+  preferenceTrace: plannerPreferenceTraceSchema.optional(),
 }).strict()
 
 export type PlannerDecisionRequestInput = z.infer<typeof plannerDecisionRequestSchema>

@@ -20,6 +20,7 @@ import type {
   PlanShareSummary,
   PlanValidationResult,
   PlannerEngineMode,
+  PlannerPreferenceTrace,
   PlannerWarning,
   SelectedPoiItem,
   TransportSuggestionMode,
@@ -181,6 +182,7 @@ export interface TripPlan {
   skipManualSelection?: boolean
   generationSource?: "manual" | "auto" | "mixed"
   plannerEngineMode?: PlannerEngineMode
+  preferenceTrace?: PlannerPreferenceTrace
   generatedPlan?: GeneratedPlan
   planExplanations?: string[]
   planMode?: "ai_original" | "user_edited"

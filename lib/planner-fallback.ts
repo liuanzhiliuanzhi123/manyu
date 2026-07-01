@@ -4,6 +4,12 @@ import type {
   PlannerCandidate,
   PlannerDecisionRequest,
 } from "@/lib/planner-types"
+import {
+  buildPreferencePolicyFromRequest,
+  getCandidatePolicyScore,
+  type PreferencePolicy,
+} from "@/lib/planner/preference-policy"
+import { repairGeneratedPlanWithPolicy } from "@/lib/planner/plan-repair"
 
 interface PlannerFallbackResult {
   plan: GeneratedPlan
@@ -22,12 +28,6 @@ function parseBudgetUpperBound(budgetRange: string) {
   const [minText, maxText] = budgetRange.split("-")
   const maxValue = Number((maxText || minText || "").replace(/[^\d]/g, ""))
   return Number.isFinite(maxValue) ? maxValue : Number.POSITIVE_INFINITY
-}
-
-function paceSpotLimit(pace: PlannerDecisionRequest["pace"]) {
-  if (pace === "fast") return 5
-  if (pace === "slow") return 3
-  return 4
 }
 
 function normalizeDistrict(input?: string) {
@@ -94,9 +94,10 @@ function scoreAttraction(
   candidate: PlannerCandidate,
   request: PlannerDecisionRequest,
   budgetUpper: number,
-  preferredSet: Set<string>
+  preferredSet: Set<string>,
+  policy: PreferencePolicy
 ) {
-  let score = 0
+  let score = getCandidatePolicyScore(candidate, policy)
   if (preferredSet.has(candidate.placeId)) score += 90
   if (Number.isFinite(candidate.rating)) score += (candidate.rating as number) * 12
 
@@ -254,18 +255,25 @@ function makeDayTheme(pace: PlannerDecisionRequest["pace"]) {
 
 export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): PlannerFallbackResult {
   const warnings: string[] = []
+  const policy = buildPreferencePolicyFromRequest(request)
   const budgetUpper = parseBudgetUpperBound(request.budgetRange)
   const preferredSet = new Set(request.manualPreferredPlaceIds || [])
   const weatherText = getWeatherRuleText(request)
   const weatherNeedsBuffer = /雨|雷阵雨|雨雪|高温|大风|沙尘|天气暂不可用/u.test(weatherText)
-  const perDayLimit = Math.max(2, paceSpotLimit(request.pace) - (weatherNeedsBuffer ? 1 : 0))
-  const maxAttractions = Math.max(request.totalDays * perDayLimit, request.totalDays * 2)
+  const perDayLimit = Math.max(
+    policy.hardConstraints.minMainActivitiesPerDay,
+    policy.hardConstraints.maxMainActivitiesPerDay - (weatherNeedsBuffer ? 1 : 0)
+  )
+  const maxAttractions = Math.max(
+    request.totalDays * perDayLimit,
+    request.totalDays * policy.hardConstraints.minMainActivitiesPerDay
+  )
 
   const rankedAttractions = [...request.attractions]
     .sort(
       (a, b) =>
-        scoreAttraction(b, request, budgetUpper, preferredSet) -
-        scoreAttraction(a, request, budgetUpper, preferredSet)
+        scoreAttraction(b, request, budgetUpper, preferredSet, policy) -
+        scoreAttraction(a, request, budgetUpper, preferredSet, policy)
     )
     .slice(0, maxAttractions)
 
@@ -370,8 +378,7 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
     "餐饮与酒店优先靠近当日锚点，并兼顾预算与偏好。",
   ]
 
-  return {
-    plan: {
+  const initialPlan: GeneratedPlan = {
       destination: request.destination,
       totalDays: request.totalDays,
       totalBudget: Number.isFinite(budgetUpper) ? budgetUpper : undefined,
@@ -379,7 +386,11 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
       days,
       droppedPlaceIds,
       explanations,
-    },
-    warnings,
+  }
+  const repaired = repairGeneratedPlanWithPolicy(initialPlan, request, policy)
+
+  return {
+    plan: repaired.plan,
+    warnings: [...warnings, ...repaired.warnings],
   }
 }

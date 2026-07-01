@@ -12,9 +12,34 @@ import {
   plannerDecisionRequestSchema,
   type PlannerDecisionRequestInput,
 } from "@/lib/planner-json-schema"
+import { buildPreferencePolicy, getLegacyFieldsFromPolicy } from "@/lib/planner/preference-policy"
+import {
+  BUDGET_TIERS,
+  INTEREST_TAGS,
+  PREFERENCE_PACES,
+  SPECIAL_NEEDS,
+  TRAVELER_GROUPS,
+} from "@/lib/planner/preference-types"
 
 const paceSchema = z.enum(["relaxed", "balanced", "intensive"])
 type InternalPace = "fast" | "balanced" | "slow"
+
+const structuredPreferencesSchema = z
+  .object({
+    travelerGroup: z.enum(TRAVELER_GROUPS).optional(),
+    interestTags: z.array(z.enum(INTEREST_TAGS)).max(16).optional(),
+    pace: z.enum(PREFERENCE_PACES).optional(),
+    specialNeeds: z.array(z.enum(SPECIAL_NEEDS)).max(16).optional(),
+    days: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+    ]).optional(),
+    budgetTier: z.enum(BUDGET_TIERS).optional(),
+  })
+  .strict()
 
 const selectedPlaceSchema = z
   .object({
@@ -47,11 +72,16 @@ const publicPlannerRequestSchema = z
       .optional(),
     pace: paceSchema.default("balanced"),
     preferences: z.array(z.string().max(24)).max(8).default([]),
+    travelerGroup: z.enum(TRAVELER_GROUPS).optional(),
+    interestTags: z.array(z.enum(INTEREST_TAGS)).max(16).default([]),
+    specialNeeds: z.array(z.enum(SPECIAL_NEEDS)).max(16).default([]),
+    budgetTier: z.enum(BUDGET_TIERS).optional(),
+    structuredPreferences: structuredPreferencesSchema.optional(),
     selectedPlaces: z.array(selectedPlaceSchema).max(20).default([]),
     startDate: z.string().max(24).optional(),
     endDate: z.string().max(24).optional(),
     travelerType: z
-      .enum(["solo", "couple", "family", "elderly", "friends"])
+      .enum(["solo", "couple", "family", "elderly", "friends", "company"])
       .default("friends"),
     transportPreference: z
       .enum(["walking", "transit", "driving", "mixed"])
@@ -82,6 +112,34 @@ function mapPublicPace(pace: z.infer<typeof paceSchema>): InternalPace {
   if (pace === "relaxed") return "slow"
   if (pace === "intensive") return "fast"
   return "balanced"
+}
+
+function inferBudgetTierFromBudget(budget?: { min?: number; max?: number }) {
+  const value = budget?.max ?? budget?.min
+  if (!Number.isFinite(value)) return undefined
+  if ((value || 0) <= 1000) return "under1000"
+  if ((value || 0) <= 3000) return "budget1000to3000"
+  if ((value || 0) <= 5000) return "budget3000to5000"
+  if ((value || 0) <= 10000) return "budget5000to10000"
+  return "over10000"
+}
+
+function specialNeedsFromTransport(transportPreference: z.infer<typeof publicPlannerRequestSchema>["transportPreference"]) {
+  if (transportPreference === "transit") return ["publicTransit"]
+  if (transportPreference === "driving") return ["driving"]
+  return []
+}
+
+function structuredPreferencesFromPolicy(policy: ReturnType<typeof buildPreferencePolicy>) {
+  const preferences = policy.normalizedPreferences
+  return {
+    travelerGroup: preferences.travelerGroup,
+    interestTags: preferences.interestTags,
+    pace: preferences.effectivePace,
+    specialNeeds: preferences.specialNeeds,
+    days: preferences.days,
+    budgetTier: preferences.budgetTier,
+  } satisfies NonNullable<PlannerDecisionRequestInput["structuredPreferences"]>
 }
 
 function selectedPlaceToCandidate(place: z.infer<typeof selectedPlaceSchema>) {
@@ -130,6 +188,23 @@ export function normalizePlannerApiRequest(payload: unknown): PlannerDecisionReq
   if ("attractions" in maybeRecord || "totalDays" in maybeRecord) {
     const parsed = internalPlannerApiRequestSchema.parse(payload)
     assertBeijing(parsed.city, parsed.province)
+    const policy = buildPreferencePolicy({
+      travelerGroup: parsed.structuredPreferences?.travelerGroup,
+      interestTags: parsed.structuredPreferences?.interestTags,
+      pace: parsed.structuredPreferences?.pace,
+      specialNeeds: parsed.structuredPreferences?.specialNeeds,
+      days: parsed.structuredPreferences?.days,
+      budgetTier: parsed.structuredPreferences?.budgetTier,
+      legacy: {
+        companions: parsed.companions,
+        interests: parsed.interests,
+        pace: parsed.pace,
+        specialNeeds: parsed.specialNeeds,
+        totalDays: parsed.totalDays,
+        budgetRange: parsed.budgetRange,
+      },
+    })
+    const legacyFields = getLegacyFieldsFromPolicy(policy)
 
     return {
       ...parsed,
@@ -138,9 +213,15 @@ export function normalizePlannerApiRequest(payload: unknown): PlannerDecisionReq
       province: "北京",
       startDate: sanitizePlannerText(parsed.startDate, 24) || undefined,
       endDate: sanitizePlannerText(parsed.endDate, 24) || undefined,
-      budgetRange: sanitizePlannerText(parsed.budgetRange, 40) || "3000-5000",
-      interests: filterSupportedBeijingInterests(parsed.interests, 8),
-      specialNeeds: parsed.specialNeeds.map((item) => sanitizePlannerText(item, 24)).filter(Boolean).slice(0, 8),
+      budgetRange: legacyFields.budgetRange,
+      companions: legacyFields.companions as PlannerDecisionRequestInput["companions"],
+      interests: filterSupportedBeijingInterests(legacyFields.interests, 8),
+      pace: legacyFields.pace as PlannerDecisionRequestInput["pace"],
+      specialNeeds: legacyFields.specialNeeds
+        .map((item) => sanitizePlannerText(item, 24))
+        .filter(Boolean)
+        .slice(0, 8),
+      structuredPreferences: structuredPreferencesFromPolicy(policy),
       attractions: filterBeijingPlannerCandidates(parsed.attractions).slice(0, 40),
       restaurants: filterBeijingPlannerCandidates(parsed.restaurants).slice(0, 80),
       hotels: filterBeijingPlannerCandidates(parsed.hotels).slice(0, 60),
@@ -171,6 +252,35 @@ export function normalizePlannerApiRequest(payload: unknown): PlannerDecisionReq
     ...selectedCandidates.filter((item) => item.type === "attraction"),
     ...context.attractions,
   ]).slice(0, 40)
+  const policy = buildPreferencePolicy({
+    travelerGroup:
+      parsed.structuredPreferences?.travelerGroup ||
+      parsed.travelerGroup ||
+      parsed.travelerType,
+    interestTags: [
+      ...(parsed.structuredPreferences?.interestTags || []),
+      ...parsed.interestTags,
+    ],
+    pace: parsed.structuredPreferences?.pace || parsed.pace,
+    specialNeeds: [
+      ...(parsed.structuredPreferences?.specialNeeds || []),
+      ...parsed.specialNeeds,
+      ...specialNeedsFromTransport(parsed.transportPreference),
+    ],
+    days: parsed.structuredPreferences?.days || parsed.days,
+    budgetTier:
+      parsed.structuredPreferences?.budgetTier ||
+      parsed.budgetTier ||
+      inferBudgetTierFromBudget(parsed.budget),
+    legacy: {
+      companions: parsed.travelerType,
+      interests: parsed.preferences,
+      pace: parsed.pace,
+      totalDays: parsed.days,
+      budgetRange: toBudgetRange(parsed.budget),
+    },
+  })
+  const legacyFields = getLegacyFieldsFromPolicy(policy)
 
   return {
     destination: `北京 ${parsed.days}日游`,
@@ -179,16 +289,12 @@ export function normalizePlannerApiRequest(payload: unknown): PlannerDecisionReq
     startDate: sanitizePlannerText(parsed.startDate, 24) || undefined,
     endDate: sanitizePlannerText(parsed.endDate, 24) || undefined,
     totalDays: parsed.days,
-    budgetRange: toBudgetRange(parsed.budget),
-    companions: parsed.travelerType,
-    interests: filterSupportedBeijingInterests(parsed.preferences, 8),
-    pace: mapPublicPace(parsed.pace),
-    specialNeeds:
-      parsed.transportPreference === "transit"
-        ? ["公共交通优先"]
-        : parsed.transportPreference === "driving"
-          ? ["自驾优先"]
-          : [],
+    budgetRange: legacyFields.budgetRange,
+    companions: legacyFields.companions as PlannerDecisionRequestInput["companions"],
+    interests: filterSupportedBeijingInterests(legacyFields.interests, 8),
+    pace: mapPublicPace(policy.normalizedPreferences.effectivePace),
+    specialNeeds: legacyFields.specialNeeds,
+    structuredPreferences: structuredPreferencesFromPolicy(policy),
     attractions,
     restaurants: filterBeijingPlannerCandidates([
       ...selectedCandidates.filter((item) => item.type === "restaurant"),

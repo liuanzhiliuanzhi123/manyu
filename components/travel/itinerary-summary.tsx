@@ -11,16 +11,15 @@ function buildStyleTags(plan: TripPlan) {
   const interests = plan.requirement?.interests || []
   const pace = plan.requirement?.pace
   const needs = plan.requirement?.specialNeeds || []
-  const tags = [...interests.slice(0, 2)]
+  const tags = [...interests.slice(0, 4)]
 
   if (pace === "fast") tags.push("特种兵式")
   if (pace === "slow") tags.push("慢节奏")
   if (!pace || pace === "balanced") tags.push("轻松适中")
 
-  if (needs.includes("公共交通优先")) tags.push("公共交通优先")
-  else if (needs.includes("自驾优先")) tags.push("自驾优先")
+  tags.push(...needs.slice(0, 3))
 
-  return Array.from(new Set(tags)).slice(0, 4)
+  return Array.from(new Set(tags)).slice(0, 8)
 }
 
 function buildWeatherOverview(plan: TripPlan) {
