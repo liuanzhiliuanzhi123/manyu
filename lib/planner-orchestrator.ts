@@ -1,6 +1,10 @@
 ﻿import "server-only"
 
-import { hasDeepSeekApiKey } from "@/lib/planner/deepseek-client"
+import {
+  DeepSeekPlannerError,
+  getDeepSeekRuntimeConfig,
+  hasDeepSeekApiKey,
+} from "@/lib/planner/deepseek-client"
 import { generatePlanByDeepSeek } from "@/lib/planner/deepseek-planner"
 import { buildFallbackGeneratedPlan } from "@/lib/planner-fallback"
 import { filterBeijingPlannerCandidates } from "@/lib/planner/beijing-planner-context"
@@ -284,6 +288,41 @@ function buildFallbackDecision(input: PlannerDecisionRequestInput, warnings: str
   return plannerDecisionResultSchema.parse(result)
 }
 
+function getSafeDeepSeekErrorDetails(error: unknown) {
+  const runtime = getDeepSeekRuntimeConfig()
+  const base = {
+    hasApiKey: runtime.hasApiKey,
+    baseUrl: runtime.baseUrl,
+    model: runtime.model,
+  }
+
+  if (error instanceof DeepSeekPlannerError) {
+    return {
+      ...base,
+      errorType: error.errorType,
+      statusCode: error.statusCode,
+      requestId: error.requestId,
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      ...base,
+      errorType:
+        error.name === "ZodError"
+          ? "schema_validation"
+          : error.message.includes("JSON")
+            ? "invalid_json"
+            : "unknown",
+    }
+  }
+
+  return {
+    ...base,
+    errorType: "unknown",
+  }
+}
+
 export async function runPlannerDecision(
   payload: unknown
 ): Promise<PlannerDecisionResultOutput> {
@@ -330,7 +369,8 @@ export async function runPlannerDecision(
       warnings: [...prepared.warnings, ...deepseek.warnings],
     }
     return plannerDecisionResultSchema.parse(result)
-  } catch {
+  } catch (error) {
+    console.warn("[planner] DeepSeek fallback", getSafeDeepSeekErrorDetails(error))
     return buildFallbackDecision(prepared.input, [
       ...prepared.warnings,
       "智能规划暂时不可用，已为你生成基础北京行程。",

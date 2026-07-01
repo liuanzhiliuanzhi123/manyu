@@ -25,6 +25,31 @@ interface DeepSeekChatResponse {
   choices?: DeepSeekChoice[]
 }
 
+export type DeepSeekPlannerErrorType =
+  | "missing_key"
+  | "timeout"
+  | "http_status"
+  | "empty_response"
+  | "network"
+
+export class DeepSeekPlannerError extends Error {
+  readonly errorType: DeepSeekPlannerErrorType
+  readonly statusCode?: number
+  readonly requestId?: string
+
+  constructor(
+    message: string,
+    errorType: DeepSeekPlannerErrorType,
+    details?: { statusCode?: number; requestId?: string }
+  ) {
+    super(message)
+    this.name = "DeepSeekPlannerError"
+    this.errorType = errorType
+    this.statusCode = details?.statusCode
+    this.requestId = details?.requestId
+  }
+}
+
 const DEFAULT_BASE_URL = "https://api.deepseek.com"
 const DEFAULT_MODEL = "deepseek-v4-pro"
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -62,7 +87,7 @@ export function getDeepSeekRuntimeConfig() {
 export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
   const apiKey = getDeepSeekApiKey()
   if (!apiKey) {
-    throw new Error("DEEPSEEK_API_KEY is missing")
+    throw new DeepSeekPlannerError("DeepSeek API key is missing", "missing_key")
   }
 
   const controller = new AbortController()
@@ -86,14 +111,22 @@ export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
     })
 
     if (!response.ok) {
-      throw new Error(`DeepSeek request failed with status ${response.status}`)
+      throw new DeepSeekPlannerError("DeepSeek request failed", "http_status", {
+        statusCode: response.status,
+        requestId:
+          response.headers.get("x-request-id") ||
+          response.headers.get("x-ds-request-id") ||
+          undefined,
+      })
     }
 
     const payload = (await response.json()) as DeepSeekChatResponse
     const text = toTextContent(payload.choices?.[0]?.message?.content).trim()
 
     if (!text) {
-      throw new Error("DeepSeek returned empty content")
+      throw new DeepSeekPlannerError("DeepSeek returned empty content", "empty_response", {
+        requestId: payload.id,
+      })
     }
 
     return {
@@ -102,8 +135,9 @@ export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
     }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("DeepSeek request timed out")
+      throw new DeepSeekPlannerError("DeepSeek request timed out", "timeout")
     }
+    if (error instanceof DeepSeekPlannerError) throw error
     throw error
   } finally {
     clearTimeout(timeout)
