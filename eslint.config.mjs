@@ -8,6 +8,8 @@ export default [
       ".next/**",
       "build/**",
       "dist/**",
+      ".tmp_*",
+      ".tmp_*/**",
       "node_modules/**",
       "next-env.d.ts",
     ],

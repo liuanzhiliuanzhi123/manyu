@@ -9,9 +9,9 @@ import type {
 } from "@/lib/planner-types"
 import {
   getCandidatePolicyScore,
-  hasMainActivityKeyword,
   type PreferencePolicy,
 } from "@/lib/planner/preference-policy"
+import { isMainActivityItem } from "@/lib/planner/main-activity"
 
 export interface PlanPolicyIssue {
   id: string
@@ -161,8 +161,24 @@ function pickSuggestion(
 function mainActivityCount(day: GeneratedPlanDay, attractionMap: Map<string, PlannerCandidate>) {
   return day.spots.filter((spot) => {
     const candidate = attractionMap.get(spot.placeId)
-    return candidate?.type === "attraction" || (candidate ? hasMainActivityKeyword(candidate) : false)
+    return Boolean(candidate && isMainActivityItem(candidate))
   }).length
+}
+
+function clockFromMinutes(minutes: number) {
+  const normalized = Math.max(0, Math.min(23 * 60 + 59, minutes))
+  const hour = Math.floor(normalized / 60)
+  const minute = normalized % 60
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+function scheduleSupplementSpot(index: number, stayMinutes?: number) {
+  const start = 9 * 60 + index * 150
+  const stay = Math.max(60, Math.min(240, stayMinutes || 120))
+  return {
+    arrivalTime: clockFromMinutes(start),
+    departureTime: clockFromMinutes(start + stay),
+  }
 }
 
 function appendPreferenceExplanations(plan: GeneratedPlan, policy: PreferencePolicy) {
@@ -207,6 +223,14 @@ export function validateGeneratedPlanAgainstPolicy(
     }
 
     const mainCount = mainActivityCount({ ...day, spots: validSpots }, attractionMap)
+    if (mainCount === 0) {
+      issues.push({
+        id: "missing_main_activity_timeline",
+        level: "error",
+        day: day.day,
+        message: "Every day must include at least one Beijing main activity in spots.",
+      })
+    }
     if (mainCount < policy.hardConstraints.minMainActivitiesPerDay) {
       issues.push({
         id: "insufficient_main_activities",
@@ -311,11 +335,17 @@ export function repairGeneratedPlanWithPolicy(
       warnings.push(`第 ${dayNumber} 天已按节奏上限截断点位。`)
     }
 
-    while (spots.length < policy.hardConstraints.minMainActivitiesPerDay) {
+    while (
+      mainActivityCount({ ...sourceDay, spots }, attractionMap) <
+      policy.hardConstraints.minMainActivitiesPerDay
+    ) {
       const supplement = pickSupplementSpot(request, policy, spots, attractionMap, usedSpotIds)
       if (!supplement) break
+      const schedule = scheduleSupplementSpot(spots.length, supplement.stayMinutes)
       spots.push({
         placeId: supplement.placeId,
+        arrivalTime: schedule.arrivalTime,
+        departureTime: schedule.departureTime,
         stayMinutes: supplement.stayMinutes,
         reason: `按${policy.normalizedPreferences.labels.pace}与${policy.normalizedPreferences.labels.interestTags.join("、") || "综合"}偏好补齐。`,
       })

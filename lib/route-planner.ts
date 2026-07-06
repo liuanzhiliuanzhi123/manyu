@@ -1014,12 +1014,23 @@ function resolveDayChunks(
       return daySpots
     })
 
-    const unplanned = spots.filter((spot) => !used.has(spot.id))
+    let unplanned = spots.filter((spot) => !used.has(spot.id))
     const notices: string[] = []
+    if (dayChunks.some((day) => day.length === 0) && unplanned.length > 0) {
+      for (const day of dayChunks) {
+        if (day.length > 0) continue
+        const supplement = unplanned.shift()
+        if (!supplement) break
+        day.push(supplement)
+        used.add(supplement.id)
+      }
+      unplanned = spots.filter((spot) => !used.has(spot.id))
+      notices.push("LLM规划存在空日程，已用候选景点自动补齐。")
+    }
     if (unplanned.length > 0) {
       notices.push(`LLM未排入${unplanned.length}个候选景点，已标记为顺延。`)
     }
-    if (dayChunks.every((day) => day.length === 0)) {
+    if (dayChunks.some((day) => day.length === 0)) {
       notices.push("LLM规划未返回有效日程，已回退规则引擎排期。")
     } else {
       const dayMetas = dayChunks.map<PlannedDayMeta>((_, index) => ({

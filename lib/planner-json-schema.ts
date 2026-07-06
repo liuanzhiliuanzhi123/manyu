@@ -122,6 +122,54 @@ const plannerPreferenceTraceSchema = z.object({
   repairApplied: z.boolean(),
 }).strict()
 
+const plannerCatalogStatsSchema = z.object({
+  attractions: z.number().int().nonnegative(),
+  restaurants: z.number().int().nonnegative(),
+  hotels: z.number().int().nonnegative(),
+}).strict()
+
+const plannerDayCountDiagnosticSchema = z.object({
+  day: z.number().int().positive(),
+  items: z.number().int().nonnegative().optional(),
+  spots: z.number().int().nonnegative().optional(),
+  mainActivities: z.number().int().nonnegative(),
+  food: z.number().int().nonnegative(),
+  hotel: z.number().int().nonnegative(),
+  transit: z.number().int().nonnegative(),
+  rest: z.number().int().nonnegative(),
+  note: z.number().int().nonnegative(),
+  unknown: z.number().int().nonnegative(),
+}).strict()
+
+const plannerDroppedItemReasonsSchema = z.object({
+  missingIdentity: z.number().int().nonnegative(),
+  invalidType: z.number().int().nonnegative(),
+  unmatchedCandidate: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+  nonMain: z.number().int().nonnegative(),
+}).strict()
+
+const plannerDiagnosticsSchema = z.object({
+  requestedPreferences: z.object({
+    city: z.string(),
+    totalDays: z.number().int().positive(),
+    budgetRange: z.string(),
+    companions: z.enum(["solo", "couple", "friends", "family", "elderly", "team"]),
+    interests: z.array(z.string()),
+    pace: z.enum(["fast", "balanced", "slow"]),
+    specialNeeds: z.array(z.string()),
+    structuredPreferences: structuredPlannerPreferencesSchema.optional(),
+  }).strict().optional(),
+  normalizedPreferences: plannerPreferenceTraceSchema.optional(),
+  poiCatalogStats: plannerCatalogStatsSchema.optional(),
+  rawModelDayCounts: z.array(plannerDayCountDiagnosticSchema).optional(),
+  normalizedDayCounts: z.array(plannerDayCountDiagnosticSchema).optional(),
+  finalDayCounts: z.array(plannerDayCountDiagnosticSchema).optional(),
+  droppedItemReasons: plannerDroppedItemReasonsSchema.optional(),
+  repairApplied: z.boolean().optional(),
+  repairReason: z.string().max(800).optional(),
+}).strict()
+
 export const generatedPlanSpotSchema = z.object({
   placeId: z.string().min(1),
   arrivalTime: z.string().optional(),
@@ -190,6 +238,7 @@ export const plannerDecisionResultSchema = z.object({
   plan: generatedPlanSchema,
   warnings: z.array(z.string()),
   preferenceTrace: plannerPreferenceTraceSchema.optional(),
+  diagnostics: plannerDiagnosticsSchema.optional(),
 }).strict()
 
 export type PlannerDecisionRequestInput = z.infer<typeof plannerDecisionRequestSchema>

@@ -188,9 +188,23 @@ function uniqueSpots(spots: Spot[]) {
   return Array.from(bucket.values())
 }
 
-function mapSpotType(type: Spot["type"]): SelectedPoiItem["type"] {
-  if (type === "restaurant") return "food"
-  if (type === "hotel") return "hotel"
+function getSpotRootCategory(spot: Spot) {
+  if (spot.rootCategory === "scenic" || spot.rootCategory === "food" || spot.rootCategory === "hotel") {
+    return spot.rootCategory
+  }
+  if (spot.type === "restaurant") return "food"
+  if (spot.type === "hotel") return "hotel"
+  return "scenic"
+}
+
+function isMainActivitySpot(spot: Spot) {
+  return getSpotRootCategory(spot) === "scenic"
+}
+
+function mapSpotType(spot: Spot): SelectedPoiItem["type"] {
+  const rootCategory = getSpotRootCategory(spot)
+  if (rootCategory === "food") return "food"
+  if (rootCategory === "hotel") return "hotel"
   return "spot"
 }
 
@@ -198,7 +212,8 @@ function toSelectedPoiSnapshot(spot: Spot): SelectedPoiItem {
   return {
     id: spot.id,
     name: spot.name,
-    type: mapSpotType(spot.type),
+    type: mapSpotType(spot),
+    rootCategory: getSpotRootCategory(spot),
     district: spot.district,
     city: spot.city,
     lng: typeof spot.lng === "number" ? spot.lng : undefined,
@@ -207,6 +222,7 @@ function toSelectedPoiSnapshot(spot: Spot): SelectedPoiItem {
     price: spot.ticketPrice,
     openingHours: spot.openTime,
     address: spot.address,
+    subTags: spot.subTags,
   }
 }
 
@@ -218,7 +234,12 @@ function toPlannerCandidate(spot: Spot): PlannerCandidate {
   return {
     placeId: spot.id,
     name: spot.name,
-    type: spot.type === "attraction" ? "attraction" : spot.type === "hotel" ? "hotel" : "restaurant",
+    type:
+      getSpotRootCategory(spot) === "hotel"
+        ? "hotel"
+        : getSpotRootCategory(spot) === "food"
+        ? "restaurant"
+        : "attraction",
     city: spot.city || "北京",
     district: spot.district,
     address: spot.address,
@@ -507,7 +528,7 @@ function computePlanTotals(days: ItineraryDay[]) {
 }
 
 function uniqueAttractionSpots(spots: Spot[]) {
-  return uniqueSpots(spots.filter((spot) => spot.type === "attraction"))
+  return uniqueSpots(spots.filter((spot) => isMainActivitySpot(spot)))
 }
 
 export function AIPlannnerPage({
@@ -761,7 +782,7 @@ export function AIPlannnerPage({
     const planSpots = generatedPlan?.spots || []
     const daySpots = resultDays.flatMap((day) => day.spots)
     return uniqueSpots([...allSelectableSpots, ...planSpots, ...daySpots]).filter(
-      (spot) => spot.type === "restaurant"
+      (spot) => getSpotRootCategory(spot) === "food"
     )
   }, [allSelectableSpots, generatedPlan?.spots, resultDays])
 
@@ -769,7 +790,7 @@ export function AIPlannnerPage({
     const planSpots = generatedPlan?.spots || []
     const daySpots = resultDays.flatMap((day) => day.spots)
     return uniqueSpots([...allSelectableSpots, ...planSpots, ...daySpots]).filter(
-      (spot) => spot.type === "hotel"
+      (spot) => getSpotRootCategory(spot) === "hotel"
     )
   }, [allSelectableSpots, generatedPlan?.spots, resultDays])
 
@@ -1292,11 +1313,11 @@ export function AIPlannnerPage({
       }
 
       const attractionCandidates = uniqueSpots(
-        finalSpots.filter((spot) => spot.type === "attraction")
+        finalSpots.filter((spot) => isMainActivitySpot(spot))
       )
       const restaurantCandidateSpots = uniqueSpots(
         [...allSelectableSpots, ...citySpots, ...autoRecommend, ...filteredManual].filter(
-          (spot) => spot.type === "restaurant"
+          (spot) => getSpotRootCategory(spot) === "food"
         )
       ).slice(0, 80)
       const hotelPreferenceBoostIds = new Set(
@@ -1310,7 +1331,7 @@ export function AIPlannnerPage({
       )
       const hotelCandidateSpots = uniqueSpots(
         [...allSelectableSpots, ...citySpots, ...filteredManual, ...finalSpots].filter(
-          (spot) => spot.type === "hotel"
+          (spot) => getSpotRootCategory(spot) === "hotel"
         )
       )
         .map((spot) =>
@@ -1350,6 +1371,10 @@ export function AIPlannnerPage({
         plannerRequestFailed = error instanceof Error ? error.message : "规划决策服务不可用"
       }
 
+      if (plannerDecision?.plan.days.some((day) => day.spots.length === 0)) {
+        throw new Error("智能规划结果缺少每日主活动点，已阻止空行程展示，请重新生成。")
+      }
+
       const attractionMap = new Map(attractionCandidates.map((spot) => [spot.id, spot]))
       const forcedDaySpotIds = plannerDecision?.plan.days.map((day) =>
         day.spots.map((spot) => spot.placeId)
@@ -1380,7 +1405,7 @@ export function AIPlannnerPage({
           )
         : []
       const fallbackAttractions = uniqueSpots(
-        citySpots.filter((spot) => spot.type === "attraction")
+        citySpots.filter((spot) => isMainActivitySpot(spot))
       ).slice(0, Math.max(requirement.days * 4, 6))
 
       const routeSpots =
@@ -1413,6 +1438,9 @@ export function AIPlannnerPage({
         restaurantMap,
         hotelMap
       )
+      if (resolvedDays.some((day) => day.spots.length === 0)) {
+        throw new Error("规划结果缺少每日景点时间线，已阻止空行程展示，请重新生成。")
+      }
 
       const totals = computePlanTotals(resolvedDays)
 

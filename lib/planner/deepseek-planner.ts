@@ -15,10 +15,18 @@ import {
   repairGeneratedPlanWithPolicy,
   validateGeneratedPlanAgainstPolicy,
 } from "@/lib/planner/plan-repair"
+import {
+  getRootCategoryFromPlannerItem,
+  isMainActivityItem,
+  normalizePlannerItemType,
+} from "@/lib/planner/main-activity"
 import type {
   GeneratedPlan,
   GeneratedPlanDay,
   GeneratedPlanSuggestion,
+  PlannerDayCountDiagnostic,
+  PlannerDiagnostics,
+  PlannerDroppedItemReasons,
   PlannerCandidate,
 } from "@/lib/planner-types"
 
@@ -26,6 +34,7 @@ interface LlmPlannerResult {
   plan: GeneratedPlan
   warnings: string[]
   repairApplied: boolean
+  diagnostics: PlannerDiagnostics
 }
 
 type DeepSeekPlanItem = DeepSeekGeneratedPlan["daysPlan"][number]["items"][number]
@@ -46,6 +55,77 @@ function normalizedName(input?: string) {
 
 function zodIssueToText(error: ZodError) {
   return error.issues.map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+}
+
+function createDroppedItemReasons(): PlannerDroppedItemReasons {
+  return {
+    missingIdentity: 0,
+    invalidType: 0,
+    unmatchedCandidate: 0,
+    duplicate: 0,
+    nonMain: 0,
+  }
+}
+
+function mergeDroppedItemReasons(
+  a: PlannerDroppedItemReasons | undefined,
+  b: PlannerDroppedItemReasons | undefined
+): PlannerDroppedItemReasons {
+  return {
+    missingIdentity: (a?.missingIdentity || 0) + (b?.missingIdentity || 0),
+    invalidType: (a?.invalidType || 0) + (b?.invalidType || 0),
+    unmatchedCandidate: (a?.unmatchedCandidate || 0) + (b?.unmatchedCandidate || 0),
+    duplicate: (a?.duplicate || 0) + (b?.duplicate || 0),
+    nonMain: (a?.nonMain || 0) + (b?.nonMain || 0),
+  }
+}
+
+function countRawModelDay(
+  day: DeepSeekGeneratedPlan["daysPlan"][number]
+): PlannerDayCountDiagnostic {
+  const counts: PlannerDayCountDiagnostic = {
+    day: day.dayIndex,
+    items: day.items.length,
+    mainActivities: 0,
+    food: 0,
+    hotel: 0,
+    transit: 0,
+    rest: 0,
+    note: 0,
+    unknown: 0,
+  }
+
+  day.items.forEach((item) => {
+    const rootCategory = getRootCategoryFromPlannerItem(item)
+    const normalizedType = normalizePlannerItemType(item)
+    if (rootCategory === "scenic") counts.mainActivities += 1
+    else if (rootCategory === "food") counts.food += 1
+    else if (rootCategory === "hotel") counts.hotel += 1
+    else if (normalizedType === "transit" || normalizedType === "transport") counts.transit += 1
+    else if (normalizedType === "rest") counts.rest += 1
+    else if (normalizedType === "note" || normalizedType === "weather") counts.note += 1
+    else counts.unknown += 1
+  })
+
+  return counts
+}
+
+function countGeneratedPlanDay(day: GeneratedPlanDay): PlannerDayCountDiagnostic {
+  return {
+    day: day.day,
+    spots: day.spots.length,
+    mainActivities: day.spots.length,
+    food: Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId)),
+    hotel: Number(Boolean(day.hotel?.placeId)),
+    transit: 0,
+    rest: 0,
+    note: 0,
+    unknown: 0,
+  }
+}
+
+function countGeneratedPlanDays(plan: GeneratedPlan): PlannerDayCountDiagnostic[] {
+  return plan.days.map(countGeneratedPlanDay)
 }
 
 function buildLookup(input: PlannerDecisionRequestInput): CandidateLookup {
@@ -128,11 +208,13 @@ function mapDeepSeekPlanToGeneratedPlan(
   rawPlan: DeepSeekGeneratedPlan,
   input: PlannerDecisionRequestInput,
   policy: PreferencePolicy
-): { plan: GeneratedPlan; warnings: string[] } {
+): { plan: GeneratedPlan; warnings: string[]; diagnostics: PlannerDiagnostics } {
   const lookup = buildLookup(input)
   const warnings: string[] = []
+  const droppedItemReasons = createDroppedItemReasons()
   const usedSpotIds = new Set<string>()
   const maxPerDay = policy.hardConstraints.maxMainActivitiesPerDay
+  const rawModelDayCounts = rawPlan.daysPlan.map(countRawModelDay)
 
   const dayMap = new Map(rawPlan.daysPlan.map((day) => [day.dayIndex, day]))
   const days: GeneratedPlanDay[] = Array.from({ length: input.totalDays }, (_, index) => {
@@ -143,16 +225,34 @@ function mapDeepSeekPlanToGeneratedPlan(
     }
 
     const sourceItems = sourceDay?.items || []
-    const scenicItems = sourceItems.filter((item) => item.type === "scenic")
+    sourceItems.forEach((item) => {
+      const rootCategory = getRootCategoryFromPlannerItem(item)
+      const normalizedType = normalizePlannerItemType(item)
+      if (!normalizeText(item.placeId) && !normalizeText(item.name)) {
+        droppedItemReasons.missingIdentity += 1
+      }
+      if (!rootCategory && normalizedType === "unknown") {
+        droppedItemReasons.invalidType += 1
+      }
+      if (rootCategory !== "scenic") {
+        droppedItemReasons.nonMain += 1
+      }
+    })
+
+    const scenicItems = sourceItems.filter((item) => isMainActivityItem(item))
     const seen = new Set<string>()
     const scenicPairs = scenicItems
       .map((item) => ({ item, candidate: findCandidate(item, "attraction", lookup) }))
       .filter((pair): pair is { item: DeepSeekPlanItem; candidate: PlannerCandidate } => {
         if (!pair.candidate) {
+          droppedItemReasons.unmatchedCandidate += 1
           warnings.push(`已过滤未知或非北京景点：${normalizeText(pair.item.name) || "未命名地点"}`)
           return false
         }
-        if (seen.has(pair.candidate.placeId)) return false
+        if (seen.has(pair.candidate.placeId)) {
+          droppedItemReasons.duplicate += 1
+          return false
+        }
         seen.add(pair.candidate.placeId)
         return true
       })
@@ -164,8 +264,12 @@ function mapDeepSeekPlanToGeneratedPlan(
     const selectedScenicPairs = scenicPairs.slice(0, maxPerDay)
     selectedScenicPairs.forEach((pair) => usedSpotIds.add(pair.candidate.placeId))
 
-    const foodItems = sourceItems.filter((item) => item.type === "food")
-    const hotelItem = sourceItems.find((item) => item.type === "hotel")
+    const foodItems = sourceItems.filter(
+      (item) => getRootCategoryFromPlannerItem(item) === "food"
+    )
+    const hotelItem = sourceItems.find(
+      (item) => getRootCategoryFromPlannerItem(item) === "hotel"
+    )
     const lunch = toSuggestion(foodItems[0], "restaurant", lookup)
     const dinner = toSuggestion(foodItems[1] || foodItems[0], "restaurant", lookup)
     const hotel = toSuggestion(hotelItem, "hotel", lookup)
@@ -236,6 +340,11 @@ function mapDeepSeekPlanToGeneratedPlan(
   return {
     plan: generated,
     warnings,
+    diagnostics: {
+      rawModelDayCounts,
+      normalizedDayCounts: countGeneratedPlanDays(generated),
+      droppedItemReasons,
+    },
   }
 }
 
@@ -308,7 +417,8 @@ function finalizePlanAgainstPolicy(
   input: PlannerDecisionRequestInput,
   policy: PreferencePolicy,
   warnings: string[],
-  repairApplied: boolean
+  repairApplied: boolean,
+  diagnostics: PlannerDiagnostics
 ): LlmPlannerResult {
   const sanitized = sanitizePlanAgainstCandidates(plan, input, policy)
   const repaired = repairGeneratedPlanWithPolicy(sanitized.plan, input, policy)
@@ -323,6 +433,11 @@ function finalizePlanAgainstPolicy(
     )
   }
 
+  const finalRepairApplied = repairApplied || repaired.repairApplied
+  const repairReason = finalRepairApplied
+    ? Array.from(new Set(repaired.warnings)).slice(0, 8).join(" | ") || "policy_repair"
+    : diagnostics.repairReason
+
   return {
     plan: repaired.plan,
     warnings: [
@@ -331,7 +446,17 @@ function finalizePlanAgainstPolicy(
       ...repaired.warnings,
       ...issues.filter((issue) => issue.level === "warning").map((issue) => issue.message),
     ],
-    repairApplied: repairApplied || repaired.repairApplied,
+    repairApplied: finalRepairApplied,
+    diagnostics: {
+      ...diagnostics,
+      droppedItemReasons: mergeDroppedItemReasons(
+        diagnostics.droppedItemReasons,
+        createDroppedItemReasons()
+      ),
+      finalDayCounts: countGeneratedPlanDays(repaired.plan),
+      repairApplied: finalRepairApplied,
+      repairReason,
+    },
   }
 }
 
@@ -355,7 +480,14 @@ export async function generatePlanByDeepSeek(
   try {
     const parsed = parseDeepSeekPlanJson(firstResponse.text)
     const mapped = mapDeepSeekPlanToGeneratedPlan(parsed, input, policy)
-    return finalizePlanAgainstPolicy(mapped.plan, input, policy, mapped.warnings, false)
+    return finalizePlanAgainstPolicy(
+      mapped.plan,
+      input,
+      policy,
+      mapped.warnings,
+      false,
+      mapped.diagnostics
+    )
   } catch (error) {
     if (!(error instanceof Error)) {
       throw error
@@ -386,7 +518,12 @@ export async function generatePlanByDeepSeek(
       input,
       policy,
       ["模型输出已修复一次后通过校验。", ...mapped.warnings],
-      true
+      true,
+      {
+        ...mapped.diagnostics,
+        repairApplied: true,
+        repairReason: "model_json_repair",
+      }
     )
   }
 }

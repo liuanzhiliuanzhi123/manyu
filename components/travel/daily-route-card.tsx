@@ -135,6 +135,11 @@ export function DailyRouteCard({
         </div>
 
         <div className="space-y-3">
+          {day.spots.length === 0 && (
+            <article className="rounded-[var(--app-radius-md)] border border-[color:rgba(187,85,75,0.35)] bg-[var(--app-surface)] p-3 text-xs leading-5 text-[var(--app-error)]">
+              当前日程缺少主景点，请重新生成行程。
+            </article>
+          )}
           {day.spots.map((spot, index) => {
             const isSpotActive = highlightedSpotId === spot.id
             const isLocked = lockedSet.has(spot.id)

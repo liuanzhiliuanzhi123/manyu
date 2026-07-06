@@ -21,6 +21,11 @@ import {
   getLegacyFieldsFromPolicy,
   type PreferencePolicy,
 } from "@/lib/planner/preference-policy"
+import type {
+  GeneratedPlan,
+  PlannerDayCountDiagnostic,
+  PlannerDiagnostics,
+} from "@/lib/planner-types"
 
 const REMOTE_DISTRICT_KEYWORDS = ["延庆", "怀柔", "密云", "平谷", "门头沟"]
 
@@ -189,6 +194,59 @@ function withPreferenceTrace(policy: PreferencePolicy, repairApplied: boolean) {
   }
 }
 
+function countFinalPlanDay(day: GeneratedPlan["days"][number]): PlannerDayCountDiagnostic {
+  return {
+    day: day.day,
+    spots: day.spots.length,
+    mainActivities: day.spots.length,
+    food: Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId)),
+    hotel: Number(Boolean(day.hotel?.placeId)),
+    transit: 0,
+    rest: 0,
+    note: 0,
+    unknown: 0,
+  }
+}
+
+function buildCatalogStats(input: PlannerDecisionRequestInput) {
+  return {
+    attractions: input.attractions.length,
+    restaurants: input.restaurants.length,
+    hotels: input.hotels.length,
+  }
+}
+
+function buildRequestedPreferences(input: PlannerDecisionRequestInput) {
+  return {
+    city: input.city,
+    totalDays: input.totalDays,
+    budgetRange: input.budgetRange,
+    companions: input.companions,
+    interests: input.interests,
+    pace: input.pace,
+    specialNeeds: input.specialNeeds,
+    structuredPreferences: input.structuredPreferences,
+  }
+}
+
+function withPlannerDiagnostics(
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy,
+  plan: GeneratedPlan,
+  repairApplied: boolean,
+  diagnostics?: PlannerDiagnostics
+): PlannerDiagnostics {
+  const normalizedPreferences = withPreferenceTrace(policy, repairApplied)
+  return {
+    ...diagnostics,
+    requestedPreferences: buildRequestedPreferences(input),
+    normalizedPreferences,
+    poiCatalogStats: buildCatalogStats(input),
+    finalDayCounts: plan.days.map(countFinalPlanDay),
+    repairApplied,
+  }
+}
+
 function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePolicy) {
   const warnings: string[] = []
   const budgetUpper = parseBudgetUpperBound(input.budgetRange)
@@ -311,14 +369,21 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
 function buildFallbackDecision(
   input: PlannerDecisionRequestInput,
   warnings: string[],
-  policy: PreferencePolicy
+  policy: PreferencePolicy,
+  diagnostics?: PlannerDiagnostics
 ) {
   const fallback = buildFallbackGeneratedPlan(input)
+  const repairApplied = true
   const result: PlannerDecisionResultOutput = {
     source: "fallback",
     plan: fallback.plan,
     warnings: [...warnings, ...fallback.warnings],
-    preferenceTrace: withPreferenceTrace(policy, true),
+    preferenceTrace: withPreferenceTrace(policy, repairApplied),
+    diagnostics: withPlannerDiagnostics(input, policy, fallback.plan, repairApplied, {
+      ...diagnostics,
+      repairApplied,
+      repairReason: diagnostics?.repairReason || "fallback_planner",
+    }),
   }
   return plannerDecisionResultSchema.parse(result)
 }
@@ -418,6 +483,13 @@ export async function runPlannerDecision(
       plan: deepseek.plan,
       warnings: [...prepared.warnings, ...deepseek.warnings],
       preferenceTrace: withPreferenceTrace(policy, deepseek.repairApplied),
+      diagnostics: withPlannerDiagnostics(
+        prepared.input,
+        policy,
+        deepseek.plan,
+        deepseek.repairApplied,
+        deepseek.diagnostics
+      ),
     }
     return plannerDecisionResultSchema.parse(result)
   } catch (error) {
@@ -425,6 +497,9 @@ export async function runPlannerDecision(
     return buildFallbackDecision(prepared.input, [
       ...prepared.warnings,
       "智能规划暂时不可用，已为你生成基础北京行程。",
-    ], policy)
+    ], policy, {
+      repairApplied: true,
+      repairReason: "deepseek_error_fallback",
+    })
   }
 }

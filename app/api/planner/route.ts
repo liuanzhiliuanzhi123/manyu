@@ -56,6 +56,7 @@ export async function POST(request: Request) {
     const payload = await request.json()
     const plannerRequest = normalizePlannerApiRequest(payload)
     const result = await runPlannerDecision(plannerRequest)
+    const diagnostics = result.diagnostics
     return NextResponse.json({
       ok: true,
       data: result,
@@ -63,6 +64,15 @@ export async function POST(request: Request) {
         source: result.source,
         fallback: result.source === "fallback",
         preferenceTrace: result.preferenceTrace,
+        requestedPreferences: diagnostics?.requestedPreferences,
+        normalizedPreferences: diagnostics?.normalizedPreferences,
+        poiCatalogStats: diagnostics?.poiCatalogStats,
+        rawModelDayCounts: diagnostics?.rawModelDayCounts,
+        normalizedDayCounts: diagnostics?.normalizedDayCounts,
+        finalDayCounts: diagnostics?.finalDayCounts,
+        droppedItemReasons: diagnostics?.droppedItemReasons,
+        repairApplied: diagnostics?.repairApplied,
+        repairReason: diagnostics?.repairReason,
       },
     })
   } catch (error) {

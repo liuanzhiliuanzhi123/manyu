@@ -17,6 +17,9 @@ export function buildPlannerSystemPrompt() {
     "Only use place IDs from provided candidates.",
     "Never invent new places, routes, opening hours, prices, images, or non-Beijing destinations.",
     "For scenic, food, and hotel items, include the candidate placeId when available.",
+    "Main activity item types include scenic, attraction, museum, cultural, culture, temple, park, landmark, performance, exhibition, art, citywalk, and nature.",
+    "Food, restaurant, hotel, transit, rest, note, and weather items never count as main activities.",
+    "Every day must include the required number of main activity items from attraction candidates.",
     "Respect constraints first: budget, pace, transport practicality, nearby food/hotel logic.",
     "If candidates are insufficient, keep the plan usable and add warnings.",
   ].join(" ")
@@ -77,7 +80,8 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
         },
         items: [
           {
-            type: "scenic | food | hotel | transit | rest | note",
+            type:
+              "scenic | attraction | museum | cultural | culture | temple | park | landmark | performance | exhibition | art | citywalk | nature | food | restaurant | hotel | transit | rest | note",
             placeId: "string(candidate id for scenic/food/hotel)",
             name: "string(candidate name only)",
             address: "string(optional, candidate address only)",
@@ -125,6 +129,9 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
       validationRules: [
         `Each day must include at least ${policy.hardConstraints.minMainActivitiesPerDay} scenic/main activity items.`,
         `Each day target total scenic/main activity items: ${policy.hardConstraints.targetTotalItemsPerDay}.`,
+        "Use attraction candidate IDs for every scenic/main activity item. Museum, culture, park, temple, landmark, performance, exhibition, art, citywalk, and nature are valid main activity item types.",
+        "Food, restaurant, hotel, transit, rest, note, and weather items cannot replace scenic/main activity items.",
+        "Never return a day with only food, hotel, transit, rest, note, or weather items.",
         "Each day must include lunch, dinner, and hotel suggestions from candidates when candidates are available.",
         "If pace is intensive, never return only one or two scenic/main activity items for a day.",
         "If lessWalking or elderlyFriendly is present, prefer same-district or adjacent-district clustering.",

@@ -279,6 +279,7 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
 
   if (rankedAttractions.length === 0) {
     warnings.push("景点候选不足，已返回可编辑的基础方案骨架。")
+    throw new Error("Fallback planner cannot build an itinerary without Beijing scenic candidates.")
   }
 
   const dayBuckets = pickDayBuckets(rankedAttractions, request.totalDays, perDayLimit)
@@ -392,6 +393,14 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
       explanations,
   }
   const repaired = repairGeneratedPlanWithPolicy(initialPlan, request, policy)
+  const blockingIssues = repaired.issues.filter((issue) => issue.level === "error")
+  if (blockingIssues.length > 0) {
+    throw new Error(
+      `Fallback planner failed main activity validation: ${blockingIssues
+        .map((issue) => issue.id)
+        .join(", ")}`
+    )
+  }
 
   return {
     plan: repaired.plan,

@@ -135,11 +135,60 @@ export interface PlannerPreferenceTrace {
   repairApplied: boolean
 }
 
+export interface PlannerCatalogStats {
+  attractions: number
+  restaurants: number
+  hotels: number
+}
+
+export interface PlannerDayCountDiagnostic {
+  day: number
+  items?: number
+  spots?: number
+  mainActivities: number
+  food: number
+  hotel: number
+  transit: number
+  rest: number
+  note: number
+  unknown: number
+}
+
+export interface PlannerDroppedItemReasons {
+  missingIdentity: number
+  invalidType: number
+  unmatchedCandidate: number
+  duplicate: number
+  nonMain: number
+}
+
+export interface PlannerDiagnostics {
+  requestedPreferences?: {
+    city: string
+    totalDays: number
+    budgetRange: string
+    companions: CompanionType
+    interests: string[]
+    pace: PacePreference
+    specialNeeds: string[]
+    structuredPreferences?: StructuredPlannerPreferences
+  }
+  normalizedPreferences?: PlannerPreferenceTrace
+  poiCatalogStats?: PlannerCatalogStats
+  rawModelDayCounts?: PlannerDayCountDiagnostic[]
+  normalizedDayCounts?: PlannerDayCountDiagnostic[]
+  finalDayCounts?: PlannerDayCountDiagnostic[]
+  droppedItemReasons?: PlannerDroppedItemReasons
+  repairApplied?: boolean
+  repairReason?: string
+}
+
 export interface PlannerDecisionResult {
   source: PlannerEngineMode
   plan: GeneratedPlan
   warnings: string[]
   preferenceTrace?: PlannerPreferenceTrace
+  diagnostics?: PlannerDiagnostics
 }
 
 export interface TravelRequirement {
@@ -158,6 +207,7 @@ export interface SelectedPoiItem {
   id: string
   name: string
   type: SelectedPoiType
+  rootCategory?: "scenic" | "food" | "hotel"
   district?: string
   city?: string
   lng?: number
@@ -166,6 +216,7 @@ export interface SelectedPoiItem {
   price?: number
   openingHours?: string
   address?: string
+  subTags?: string[]
 }
 
 export interface PlannerDraft {
