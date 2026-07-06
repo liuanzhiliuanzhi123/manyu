@@ -376,6 +376,10 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
     "先执行规则约束过滤，再在候选内进行排序与取舍。",
     "同区串联优先，减少跨区折返。",
     "餐饮与酒店优先靠近当日锚点，并兼顾预算与偏好。",
+    ...policy.transportRules,
+    ...policy.budgetRules,
+    ...policy.hotelRules,
+    ...policy.foodRules,
   ]
 
   const initialPlan: GeneratedPlan = {
