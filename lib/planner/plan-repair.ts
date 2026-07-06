@@ -165,6 +165,18 @@ function mainActivityCount(day: GeneratedPlanDay, attractionMap: Map<string, Pla
   }).length
 }
 
+function appendPreferenceExplanations(plan: GeneratedPlan, policy: PreferencePolicy) {
+  const explanations = [
+    ...(plan.explanations || []),
+    ...policy.transportRules,
+    ...policy.budgetRules,
+    ...policy.hotelRules,
+    ...policy.foodRules,
+  ].filter(Boolean)
+
+  return Array.from(new Set(explanations))
+}
+
 export function validateGeneratedPlanAgainstPolicy(
   plan: GeneratedPlan,
   request: PlannerDecisionRequest,
@@ -361,6 +373,7 @@ export function repairGeneratedPlanWithPolicy(
     totalDays: request.totalDays,
     weatherSummary: plan.weatherSummary || request.weatherContext?.summary,
     days,
+    explanations: appendPreferenceExplanations(plan, policy),
     droppedPlaceIds: request.attractions
       .map((candidate) => candidate.placeId)
       .filter((placeId) => !usedSpotIds.has(placeId)),
