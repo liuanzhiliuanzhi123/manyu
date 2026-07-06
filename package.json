@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build:tourism-data": "tsx scripts/build-tourism-data.ts",
     "fetch:pexels-images": "tsx scripts/fetch-pexels-images.ts",
+    "import:beijing-pois": "tsx scripts/import-beijing-pois.ts",
     "verify:beijing-quality": "tsx scripts/verify-beijing-quality.ts",
     "build": "next build",
     "start": "next start",

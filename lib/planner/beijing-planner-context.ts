@@ -1,10 +1,9 @@
 import {
-  beijingAttractionSeeds,
-  beijingHotelSeeds,
-  beijingRestaurantSeeds,
-  isBeijingCityName,
-  type BeijingSpotSeed,
-} from "@/lib/beijing-place-data"
+  beijingPoiAttractionSeeds,
+  beijingPoiHotelSeeds,
+  beijingPoiRestaurantSeeds,
+  type BeijingPoiSpotSeed,
+} from "@/lib/places/beijing-poi-data"
 import type { PlannerCandidate } from "@/lib/planner-types"
 
 export const BEIJING_MVP_INTERESTS = [
@@ -47,7 +46,16 @@ function toFiniteNumber(value: unknown) {
 }
 
 export function isBeijingPlannerCity(city?: string, province?: string) {
-  return isBeijingCityName(city) || isBeijingCityName(province)
+  const normalize = (value?: string) =>
+    (value || "").trim().replace(/\s+/g, "").replace(/市$/u, "").replace(/甯?$/u, "")
+  const cityText = normalize(city)
+  const provinceText = normalize(province)
+  return (
+    cityText === "北京" ||
+    cityText === "鍖椾含" ||
+    provinceText === "北京" ||
+    provinceText === "鍖椾含"
+  )
 }
 
 export function isBeijingPlannerCandidate(candidate: {
@@ -64,7 +72,11 @@ export function isBeijingPlannerCandidate(candidate: {
   ]
     .filter(Boolean)
     .join(" ")
-  return isBeijingPlannerCity(candidate.city, candidate.province) || text.includes("北京")
+  return (
+    isBeijingPlannerCity(candidate.city, candidate.province) ||
+    text.includes("北京") ||
+    text.includes("鍖椾含")
+  )
 }
 
 export function sanitizePlannerText(input: unknown, maxLength = 80) {
@@ -72,7 +84,7 @@ export function sanitizePlannerText(input: unknown, maxLength = 80) {
   return input.trim().replace(/\s+/g, " ").slice(0, maxLength)
 }
 
-function toCandidate(seed: BeijingSpotSeed): PlannerCandidate {
+function toCandidate(seed: BeijingPoiSpotSeed): PlannerCandidate {
   return {
     placeId: seed.id,
     name: sanitizePlannerText(seed.name, 60),
@@ -87,7 +99,9 @@ function toCandidate(seed: BeijingSpotSeed): PlannerCandidate {
     address: sanitizePlannerText(seed.address, 120) || undefined,
     rating: toFiniteNumber(seed.rating),
     price: toFiniteNumber(seed.ticketPrice),
-    tags: seed.tags.map((tag) => sanitizePlannerText(tag, 24)).filter(Boolean),
+    tags: [...seed.tags, ...(seed.subTags || [])]
+      .map((tag) => sanitizePlannerText(tag, 24))
+      .filter(Boolean),
     lng: toFiniteNumber(seed.lng),
     lat: toFiniteNumber(seed.lat),
     openTime: sanitizePlannerText(seed.openTime, 80) || undefined,
@@ -132,15 +146,15 @@ export function buildBeijingPlannerCandidates(input?: {
   }
 
   return {
-    attractions: beijingAttractionSeeds
+    attractions: beijingPoiAttractionSeeds
       .map(toCandidate)
       .sort(sortPreferredFirst)
       .slice(0, input?.attractionLimit ?? 32),
-    restaurants: beijingRestaurantSeeds
+    restaurants: beijingPoiRestaurantSeeds
       .map(toCandidate)
       .sort(sortPreferredFirst)
       .slice(0, input?.restaurantLimit ?? 60),
-    hotels: beijingHotelSeeds
+    hotels: beijingPoiHotelSeeds
       .map(toCandidate)
       .sort(sortPreferredFirst)
       .slice(0, input?.hotelLimit ?? 40),

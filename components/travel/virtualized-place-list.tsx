@@ -35,8 +35,9 @@ function SpotImage({ spot }: { spot: Spot }) {
         name={spot.name}
         city={spot.city}
         province={spot.province}
-        type={spot.type}
+        type={spot.rootCategory || spot.type}
         alt={spot.name}
+        fallbackSrc={spot.image}
         onLoad={() => setLoaded(true)}
         className={cn(
           "h-full w-full object-cover transition-opacity duration-300",
@@ -105,10 +106,18 @@ export function VirtualizedPlaceList({
           </div>
 
           <div className="mt-3 space-y-2">
-            <p className="line-clamp-2 text-xs leading-5 text-[var(--app-text-secondary)]">{spot.address}</p>
+            <p className="line-clamp-2 text-xs leading-5 text-[var(--app-text-secondary)]">
+              {spot.businessArea ? `${spot.businessArea} · ` : ""}
+              {spot.address}
+            </p>
+            {spot.description && (
+              <p className="line-clamp-2 text-xs leading-5 text-[var(--app-text-muted)]">
+                {spot.description}
+              </p>
+            )}
 
             <div className="flex flex-wrap gap-1.5">
-              {spot.tags.slice(0, 2).map((tag) => (
+              {spot.tags.slice(0, 3).map((tag) => (
                 <AppTag key={tag}>{tag}</AppTag>
               ))}
               <AppTag tone="info">{spot.type === "attraction" ? "景点" : spot.type === "restaurant" ? "美食" : "酒店"}</AppTag>

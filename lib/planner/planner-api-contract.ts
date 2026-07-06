@@ -44,17 +44,21 @@ const structuredPreferencesSchema = z
 const selectedPlaceSchema = z
   .object({
     id: z.string().min(1).max(120),
+    amapPoiId: z.string().max(120).optional(),
     name: z.string().min(1).max(120),
     type: z.enum(["scenic", "food", "hotel", "spot", "attraction", "restaurant"]).optional(),
+    rootCategory: z.enum(["scenic", "food", "hotel"]).optional(),
     city: z.string().max(40).optional(),
     province: z.string().max(40).optional(),
     district: z.string().max(40).optional(),
+    businessArea: z.string().max(80).optional(),
     address: z.string().max(160).optional(),
     lat: z.number().finite().optional(),
     lng: z.number().finite().optional(),
     rating: z.number().finite().optional(),
     price: z.number().finite().optional(),
     tags: z.array(z.string().max(24)).max(8).optional(),
+    subTags: z.array(z.string().max(32)).max(8).optional(),
   })
   .strict()
 
@@ -143,22 +147,24 @@ function structuredPreferencesFromPolicy(policy: ReturnType<typeof buildPreferen
 }
 
 function selectedPlaceToCandidate(place: z.infer<typeof selectedPlaceSchema>) {
+  const rootCategory = place.rootCategory || place.type
   const mappedType =
-    place.type === "hotel"
+    rootCategory === "hotel"
       ? "hotel"
-      : place.type === "food" || place.type === "restaurant"
+      : rootCategory === "food" || rootCategory === "restaurant"
         ? "restaurant"
         : "attraction"
+  const tags = [...(place.tags || []), ...(place.subTags || [])]
   return {
     placeId: sanitizePlannerText(place.id, 120),
     name: sanitizePlannerText(place.name, 80),
     type: mappedType,
     city: "北京",
-    district: sanitizePlannerText(place.district, 32) || undefined,
+    district: sanitizePlannerText(place.district || place.businessArea, 32) || undefined,
     address: sanitizePlannerText(place.address, 140) || undefined,
     rating: place.rating,
     price: place.price,
-    tags: (place.tags || []).map((tag) => sanitizePlannerText(tag, 24)).filter(Boolean),
+    tags: tags.map((tag) => sanitizePlannerText(tag, 24)).filter(Boolean),
     lng: place.lng,
     lat: place.lat,
     source: "selected",

@@ -11,7 +11,8 @@ import {
   type ReactNode,
 } from "react"
 import { useAuth } from "@/lib/auth/use-auth"
-import { beijingSpotSeeds } from "@/lib/beijing-place-data"
+import { beijingPoiSpotSeeds } from "@/lib/places/beijing-poi-data"
+import type { BeijingPoiRootCategory, BeijingPoiSubTag } from "@/lib/places/poi-types"
 import type { TransitStep } from "@/lib/amap-route-utils"
 import type {
   GeneratedPlan,
@@ -48,18 +49,23 @@ export interface Spot {
   id: string
   name: string
   type: "attraction" | "restaurant" | "hotel"
+  rootCategory?: BeijingPoiRootCategory
+  amapPoiId?: string
   address: string
   rating: number
   heat: number
   ticketPrice: number
   description: string
   image: string
+  imageTitle?: string
   tags: string[]
+  subTags?: BeijingPoiSubTag[]
   openTime?: string
   phone?: string
   province?: string
   city?: string
   district?: string
+  businessArea?: string
   lng?: number | string
   lat?: number | string
   longitude?: number | string
@@ -231,6 +237,11 @@ function toStringArray(value: unknown): string[] {
   return asText ? [asText] : []
 }
 
+function normalizeRootCategory(value: unknown): BeijingPoiRootCategory | undefined {
+  if (value === "scenic" || value === "food" || value === "hotel") return value
+  return undefined
+}
+
 function normalizeLocation(value: unknown): Spot["location"] | undefined {
   if (typeof value === "string") {
     const text = value.trim()
@@ -323,9 +334,14 @@ function sanitizeSpotInput(spot: Spot): Spot {
     district: getDistrictFromPayload(payload),
     openTime: toText(payload.openTime) || toText(payload.openingHours),
     phone: toText(payload.phone) || toText(payload.contact),
+    rootCategory: normalizeRootCategory(payload.rootCategory),
+    amapPoiId: toText(payload.amapPoiId) || undefined,
+    businessArea: toText(payload.businessArea) || undefined,
+    imageTitle: toText(payload.imageTitle) || undefined,
     location: normalizeLocation(payload.location),
     coordinates: normalizeCoordinates(payload.coordinates),
     tags: toStringArray(payload.tags),
+    subTags: toStringArray(payload.subTags) as BeijingPoiSubTag[],
   }
 }
 
@@ -349,8 +365,8 @@ const FALLBACK_SPOTS: Spot[] = [
 ]
 
 export const sampleSpots: Spot[] =
-  beijingSpotSeeds.length > 0
-    ? beijingSpotSeeds.map((spot) => ({
+  beijingPoiSpotSeeds.length > 0
+    ? beijingPoiSpotSeeds.map((spot) => ({
         ...spot,
       }))
     : FALLBACK_SPOTS
