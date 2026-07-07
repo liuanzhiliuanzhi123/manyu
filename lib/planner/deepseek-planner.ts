@@ -49,6 +49,28 @@ interface CandidateLookup {
   byName: Record<CandidateType, Map<string, PlannerCandidate>>
 }
 
+function getDeepSeekBudget(input: PlannerDecisionRequestInput) {
+  if (input.totalDays >= 5) {
+    return {
+      maxTokens: 4200,
+      timeoutMs: 35_000,
+      allowModelRepair: false,
+    }
+  }
+  if (input.totalDays >= 4) {
+    return {
+      maxTokens: 4200,
+      timeoutMs: 55_000,
+      allowModelRepair: false,
+    }
+  }
+  return {
+    maxTokens: 3200,
+    timeoutMs: 45_000,
+    allowModelRepair: true,
+  }
+}
+
 function normalizeText(input?: string) {
   return (input || "").trim().replace(/\s+/g, " ")
 }
@@ -496,6 +518,7 @@ export async function generatePlanByDeepSeek(
   input: PlannerDecisionRequestInput
 ): Promise<LlmPlannerResult> {
   const policy = buildPreferencePolicyFromRequest(input)
+  const budget = getDeepSeekBudget(input)
   const systemPrompt = buildPlannerSystemPrompt()
   const userPrompt = buildPlannerUserPrompt(input)
 
@@ -505,8 +528,8 @@ export async function generatePlanByDeepSeek(
       { role: "user", content: userPrompt },
     ],
     temperature: 0.4,
-    maxTokens: 4200,
-    timeoutMs: 60_000,
+    maxTokens: budget.maxTokens,
+    timeoutMs: budget.timeoutMs,
   })
 
   try {
@@ -525,6 +548,10 @@ export async function generatePlanByDeepSeek(
       throw error
     }
 
+    if (!budget.allowModelRepair) {
+      throw error
+    }
+
     const validationIssues: string[] = []
     if (error.name === "ZodError") {
       validationIssues.push(...zodIssueToText(error as ZodError))
@@ -539,8 +566,8 @@ export async function generatePlanByDeepSeek(
         { role: "user", content: `${userPrompt}\n${repairPrompt}` },
       ],
       temperature: 0.2,
-      maxTokens: 4200,
-      timeoutMs: 60_000,
+      maxTokens: budget.maxTokens,
+      timeoutMs: Math.min(30_000, budget.timeoutMs),
     })
 
     const repairedParsed = parseDeepSeekPlanJson(repairedResponse.text)
