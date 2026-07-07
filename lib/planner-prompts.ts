@@ -2,6 +2,23 @@
 
 import { buildPreferencePolicyFromRequest } from "@/lib/planner/preference-policy"
 
+type PromptCandidate = PlannerDecisionRequestInput["attractions"][number]
+
+function toPromptCandidate(candidate: PromptCandidate) {
+  return {
+    placeId: candidate.placeId,
+    name: candidate.name,
+    type: candidate.type,
+    city: candidate.city,
+    district: candidate.district,
+    address: candidate.address,
+    rating: candidate.rating,
+    price: candidate.price,
+    tags: (candidate.tags || []).slice(0, 6),
+    stayMinutes: candidate.stayMinutes,
+  }
+}
+
 function summarizeInterests(interests: string[]) {
   return interests.length > 0 ? interests.join("、") : "无明确兴趣偏好"
 }
@@ -163,10 +180,10 @@ export function buildPlannerUserPrompt(input: PlannerDecisionRequestInput) {
       ],
     },
     candidates: {
-      attractions: input.attractions,
-      restaurants: input.restaurants,
-      hotels: input.hotels,
-      routeHints: input.routeHints ?? [],
+      attractions: input.attractions.map(toPromptCandidate),
+      restaurants: input.restaurants.map(toPromptCandidate),
+      hotels: input.hotels.map(toPromptCandidate),
+      routeHints: (input.routeHints ?? []).slice(0, 100),
       manualPreferredPlaceIds: input.manualPreferredPlaceIds ?? [],
     },
     requiredOutputSchema: outputContract,

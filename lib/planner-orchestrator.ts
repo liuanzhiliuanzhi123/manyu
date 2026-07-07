@@ -421,12 +421,22 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
 
   const restaurants = filteredRestaurants.length > 0 ? filteredRestaurants : rawRestaurants
   const hotels = filteredHotels.length > 0 ? filteredHotels : rawHotels
+  const restaurantLimit = Math.max(16, input.totalDays * 6)
+  const hotelLimit = Math.max(8, input.totalDays * 3)
+  const limitedRestaurants = restaurants.slice(0, restaurantLimit)
+  const limitedHotels = hotels.slice(0, hotelLimit)
 
-  if (restaurants.length === 0) {
+  if (limitedRestaurants.length === 0) {
     warnings.push("餐饮候选不足，后续将使用基础规则兜底。")
   }
-  if (hotels.length === 0) {
+  if (limitedHotels.length === 0) {
     warnings.push("酒店候选不足，后续将使用基础规则兜底。")
+  }
+  if (limitedRestaurants.length < restaurants.length) {
+    warnings.push(`已为模型提示保留 ${limitedRestaurants.length}/${restaurants.length} 个餐饮候选。`)
+  }
+  if (limitedHotels.length < hotels.length) {
+    warnings.push(`已为模型提示保留 ${limitedHotels.length}/${hotels.length} 个酒店候选。`)
   }
 
   warnings.push(...policy.conflictWarnings)
@@ -435,8 +445,8 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
     input: {
       ...input,
       attractions: routeFilteredAttractions,
-      restaurants,
-      hotels,
+      restaurants: limitedRestaurants,
+      hotels: limitedHotels,
       manualPreferredPlaceIds: manualKept,
     },
     warnings,
