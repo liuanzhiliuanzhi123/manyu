@@ -768,6 +768,18 @@ export function AIPlannnerPage({
       ? `你已手动添加 ${selectedPois.length} 项，生成时会优先保留`
       : "当前未手动添加内容，下一步将按城市、预算与偏好自动推荐"
 
+  const selectedPoiStats = useMemo(() => {
+    const scenic = selectedPois.filter((spot) => getSpotRootCategory(spot) === "scenic").length
+    const food = selectedPois.filter((spot) => getSpotRootCategory(spot) === "food").length
+    const hotel = selectedPois.filter((spot) => getSpotRootCategory(spot) === "hotel").length
+    return {
+      scenic,
+      food,
+      hotel,
+      total: scenic + food + hotel,
+    }
+  }, [selectedPois])
+
   const resultDays = generatedPlan?.days || []
   const activeResultDay =
     resultDays[activeResultDayIndex] || resultDays[0] || null
@@ -1766,6 +1778,11 @@ export function AIPlannnerPage({
               <p className="mt-1 text-xs text-[var(--app-text-secondary)]">
                 确认目的地、需求与导入内容后再生成方案。
               </p>
+              <div className="mt-3 rounded-[var(--app-radius-sm)] bg-[var(--app-brand-soft)] px-3 py-2 text-xs font-medium leading-5 text-[var(--brand-deep)]">
+                {requirement.city || "未选择城市"} · {requirement.days} 天 · 预算 {requirement.budgetRange} ·{" "}
+                {COMPANION_LABEL[requirement.companions]} · {toPaceLabel(requirement.pace)} · 已选{" "}
+                {selectedPoiStats.total} 个地点
+              </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
                   目的地 <span className="font-medium text-[var(--app-text-strong)]">{requirement.city}</span>
@@ -1778,6 +1795,12 @@ export function AIPlannnerPage({
                 </div>
                 <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
                   同行 <span className="font-medium text-[var(--app-text-strong)]">{COMPANION_LABEL[requirement.companions]}</span>
+                </div>
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  已选景点 <span className="numeric font-medium text-[var(--app-text-strong)]">{selectedPoiStats.scenic}</span>
+                </div>
+                <div className="rounded-[var(--app-radius-sm)] bg-[var(--app-surface)] px-3 py-2 text-[var(--app-text-secondary)]">
+                  美食/酒店 <span className="numeric font-medium text-[var(--app-text-strong)]">{selectedPoiStats.food} / {selectedPoiStats.hotel}</span>
                 </div>
               </div>
             </AppCard>
@@ -2021,7 +2044,7 @@ export function AIPlannnerPage({
               </div>
             </details>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-3">
               <AppButton
                 type="button"
                 onClick={() => setCurrentStep(4)}

@@ -19,9 +19,15 @@ export function PlannerSummaryBar({
   actionText,
   disabled,
 }: PlannerSummaryBarProps) {
-  const spotCount = selectedPois.filter((item) => item.type === "attraction").length
-  const foodCount = selectedPois.filter((item) => item.type === "restaurant").length
-  const hotelCount = selectedPois.filter((item) => item.type === "hotel").length
+  const spotCount = selectedPois.filter(
+    (item) => item.rootCategory === "scenic" || item.type === "attraction"
+  ).length
+  const foodCount = selectedPois.filter(
+    (item) => item.rootCategory === "food" || item.type === "restaurant"
+  ).length
+  const hotelCount = selectedPois.filter(
+    (item) => item.rootCategory === "hotel" || item.type === "hotel"
+  ).length
 
   return (
     <div className="glass sticky bottom-[5.2rem] z-20 rounded-[var(--app-radius-lg)] border border-[var(--app-line)] p-3">

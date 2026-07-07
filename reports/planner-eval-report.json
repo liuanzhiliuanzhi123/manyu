@@ -8,7 +8,7 @@
     "hardFailureCount": 0,
     "fallbackCount": 12,
     "repairAppliedCount": 0,
-    "generatedAt": "2026-07-07T07:28:10.631Z",
+    "generatedAt": "2026-07-07T07:45:26.943Z",
     "commonFailureReasons": []
   },
   "results": [
@@ -61,7 +61,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 17
+        "durationMs": 16
       }
     },
     {
@@ -108,7 +108,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 8
+        "durationMs": 7
       }
     },
     {
@@ -150,7 +150,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 5
+        "durationMs": 6
       }
     },
     {
@@ -197,7 +197,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 8
+        "durationMs": 7
       }
     },
     {
@@ -234,7 +234,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 4
+        "durationMs": 3
       }
     },
     {
@@ -291,7 +291,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 6
+        "durationMs": 7
       }
     },
     {
@@ -422,7 +422,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 3
+        "durationMs": 2
       }
     },
     {
@@ -465,7 +465,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 2
+        "durationMs": 3
       }
     },
     {
@@ -512,7 +512,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 5
+        "durationMs": 4
       }
     },
     {
@@ -559,7 +559,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 3
+        "durationMs": 4
       }
     }
   ]

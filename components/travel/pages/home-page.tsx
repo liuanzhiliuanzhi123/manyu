@@ -111,7 +111,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               </p>
             </div>
 
-            <div className="grid grid-cols-[1fr_auto] gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 min-[380px]:grid-cols-[1fr_auto]">
               <AppButton
                 type="button"
                 size="lg"

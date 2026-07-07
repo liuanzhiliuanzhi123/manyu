@@ -58,7 +58,7 @@ export function SavedPlanCard({ plan, onOpen, onDelete, onShare }: SavedPlanCard
           )}
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-1 gap-2 min-[380px]:grid-cols-3">
           <AppButton
             type="button"
             size="sm"
