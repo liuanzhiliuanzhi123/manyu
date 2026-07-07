@@ -4,6 +4,8 @@ import { checkPlannerRateLimit } from "@/lib/planner/rate-limit"
 import { runPlannerDecision } from "@/lib/planner-orchestrator"
 import { createSupabaseRouteClient } from "@/lib/supabase/server"
 
+export const maxDuration = 75
+
 function getClientIp(request: Request) {
   const forwarded = request.headers.get("x-forwarded-for") || ""
   const firstForwarded = forwarded.split(",")[0]?.trim()

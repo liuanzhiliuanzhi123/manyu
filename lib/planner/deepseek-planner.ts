@@ -506,7 +506,7 @@ export async function generatePlanByDeepSeek(
     ],
     temperature: 0.4,
     maxTokens: 4200,
-    timeoutMs: 45_000,
+    timeoutMs: 60_000,
   })
 
   try {
@@ -540,7 +540,7 @@ export async function generatePlanByDeepSeek(
       ],
       temperature: 0.2,
       maxTokens: 4200,
-      timeoutMs: 45_000,
+      timeoutMs: 60_000,
     })
 
     const repairedParsed = parseDeepSeekPlanJson(repairedResponse.text)

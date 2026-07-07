@@ -52,7 +52,7 @@ export class DeepSeekPlannerError extends Error {
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com"
 const DEFAULT_MODEL = "deepseek-v4-pro"
-const DEFAULT_TIMEOUT_MS = 45_000
+const DEFAULT_TIMEOUT_MS = 60_000
 
 function getDeepSeekApiKey() {
   return (process.env.DEEPSEEK_API_KEY || "").trim()
