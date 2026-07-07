@@ -505,8 +505,8 @@ export async function generatePlanByDeepSeek(
       { role: "user", content: userPrompt },
     ],
     temperature: 0.4,
-    maxTokens: 3000,
-    timeoutMs: 30_000,
+    maxTokens: 4200,
+    timeoutMs: 45_000,
   })
 
   try {
@@ -539,8 +539,8 @@ export async function generatePlanByDeepSeek(
         { role: "user", content: `${userPrompt}\n${repairPrompt}` },
       ],
       temperature: 0.2,
-      maxTokens: 3000,
-      timeoutMs: 30_000,
+      maxTokens: 4200,
+      timeoutMs: 45_000,
     })
 
     const repairedParsed = parseDeepSeekPlanJson(repairedResponse.text)
