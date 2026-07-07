@@ -12,7 +12,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:planner": "tsx scripts/run-planner-evals.ts",
+    "eval:planner:live": "tsx scripts/run-planner-evals.ts --live"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",

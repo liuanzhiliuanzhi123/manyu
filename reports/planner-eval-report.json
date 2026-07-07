@@ -1,0 +1,566 @@
+{
+  "summary": {
+    "mode": "offline",
+    "totalCases": 12,
+    "passedCases": 12,
+    "failedCases": 0,
+    "averageScore": 100,
+    "hardFailureCount": 0,
+    "fallbackCount": 12,
+    "repairAppliedCount": 0,
+    "generatedAt": "2026-07-07T07:00:36.597Z",
+    "commonFailureReasons": []
+  },
+  "results": [
+    {
+      "caseId": "intensive_history_food_4d",
+      "caseName": "Intensive 4-day history, nature, food, nightlife",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target",
+        "day_4_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 4,
+        "finalDays": 4,
+        "daysPlanLength": 4,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          6,
+          6,
+          6,
+          6
+        ],
+        "totalItemsPerDay": [
+          9,
+          9,
+          9,
+          9
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 16
+      }
+    },
+    {
+      "caseId": "relaxed_less_walking_3d",
+      "caseName": "Relaxed less-walking 3-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 3,
+        "finalDays": 3,
+        "daysPlanLength": 3,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          3,
+          3,
+          3
+        ],
+        "totalItemsPerDay": [
+          6,
+          6,
+          6
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 6
+      }
+    },
+    {
+      "caseId": "family_kid_nature_2d",
+      "caseName": "Family kid-friendly nature and museum 2-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 2,
+        "finalDays": 2,
+        "daysPlanLength": 2,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 5
+      }
+    },
+    {
+      "caseId": "elderly_friendly_3d",
+      "caseName": "Elderly-friendly 3-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 3,
+        "finalDays": 3,
+        "daysPlanLength": 3,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          3,
+          3,
+          3
+        ],
+        "totalItemsPerDay": [
+          6,
+          6,
+          6
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 5
+      }
+    },
+    {
+      "caseId": "low_budget_1d",
+      "caseName": "Low-budget 1-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 1,
+        "finalDays": 1,
+        "daysPlanLength": 1,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4
+        ],
+        "totalItemsPerDay": [
+          7
+        ],
+        "foodItemsPerDay": [
+          2
+        ],
+        "hotelItemsPerDay": [
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 4
+      }
+    },
+    {
+      "caseId": "premium_hotel_comfort_5d",
+      "caseName": "Premium comfort hotel 5-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target",
+        "day_4_total_items_outside_target",
+        "day_5_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 5,
+        "finalDays": 5,
+        "daysPlanLength": 5,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7,
+          7,
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 6
+      }
+    },
+    {
+      "caseId": "halal_food_citywalk_2d",
+      "caseName": "Halal food and citywalk 2-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 2,
+        "finalDays": 2,
+        "daysPlanLength": 2,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 3
+      }
+    },
+    {
+      "caseId": "nightlife_friends_2d",
+      "caseName": "Nightlife friends 2-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 2,
+        "finalDays": 2,
+        "daysPlanLength": 2,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 4
+      }
+    },
+    {
+      "caseId": "selected_food_only_3d",
+      "caseName": "Food-only selected places 3-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 3,
+        "finalDays": 3,
+        "daysPlanLength": 3,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 3
+      }
+    },
+    {
+      "caseId": "selected_hotel_only_2d",
+      "caseName": "Hotel-only selected places 2-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "budget_behavior_not_explicit_in_request"
+      ],
+      "metrics": {
+        "requestedDays": 2,
+        "finalDays": 2,
+        "daysPlanLength": 2,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          3,
+          3
+        ],
+        "totalItemsPerDay": [
+          6,
+          6
+        ],
+        "foodItemsPerDay": [
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 3
+      }
+    },
+    {
+      "caseId": "empty_selected_places_3d",
+      "caseName": "Empty selected places 3-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 3,
+        "finalDays": 3,
+        "daysPlanLength": 3,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 4
+      }
+    },
+    {
+      "caseId": "public_transit_3d",
+      "caseName": "Public transit priority 3-day plan",
+      "passed": true,
+      "score": 100,
+      "maxScore": 100,
+      "hardFailures": [],
+      "softWarnings": [
+        "day_1_total_items_outside_target",
+        "day_2_total_items_outside_target",
+        "day_3_total_items_outside_target"
+      ],
+      "metrics": {
+        "requestedDays": 3,
+        "finalDays": 3,
+        "daysPlanLength": 3,
+        "dayCountMatched": true,
+        "mainActivitiesPerDay": [
+          4,
+          4,
+          4
+        ],
+        "totalItemsPerDay": [
+          7,
+          7,
+          7
+        ],
+        "foodItemsPerDay": [
+          2,
+          2,
+          2
+        ],
+        "hotelItemsPerDay": [
+          1,
+          1,
+          1
+        ],
+        "nonBeijingItems": 0,
+        "foodAsMainActivity": 0,
+        "hotelAsMainActivity": 0,
+        "missingFoodSuggestions": false,
+        "missingHotelSuggestions": false,
+        "fallback": true,
+        "repairApplied": false,
+        "durationMs": 4
+      }
+    }
+  ]
+}
