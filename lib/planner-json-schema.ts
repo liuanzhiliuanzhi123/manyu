@@ -180,6 +180,14 @@ const plannerDiagnosticsSchema = z.object({
   normalizedDayCounts: z.array(plannerDayCountDiagnosticSchema).optional(),
   finalDayCounts: z.array(plannerDayCountDiagnosticSchema).optional(),
   droppedItemReasons: plannerDroppedItemReasonsSchema.optional(),
+  deepseekError: z.object({
+    hasApiKey: z.boolean().optional(),
+    baseUrl: z.string().optional(),
+    model: z.string().optional(),
+    errorType: z.string().optional(),
+    statusCode: z.number().int().optional(),
+    requestId: z.string().optional(),
+  }).strict().optional(),
   repairApplied: z.boolean().optional(),
   repairReason: z.string().max(800).optional(),
 }).strict()

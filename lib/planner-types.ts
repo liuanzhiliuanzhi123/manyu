@@ -193,6 +193,14 @@ export interface PlannerDiagnostics {
   normalizedDayCounts?: PlannerDayCountDiagnostic[]
   finalDayCounts?: PlannerDayCountDiagnostic[]
   droppedItemReasons?: PlannerDroppedItemReasons
+  deepseekError?: {
+    hasApiKey?: boolean
+    baseUrl?: string
+    model?: string
+    errorType?: string
+    statusCode?: number
+    requestId?: string
+  }
   repairApplied?: boolean
   repairReason?: string
 }

@@ -498,6 +498,8 @@ function getSafeDeepSeekErrorDetails(error: unknown) {
       errorType:
         error.name === "ZodError"
           ? "schema_validation"
+          : error.message.includes("Preference policy validation")
+            ? "policy_validation"
           : error.message.includes("JSON")
             ? "invalid_json"
             : "unknown",
@@ -602,12 +604,14 @@ export async function runPlannerDecision(
     }
     return plannerDecisionResultSchema.parse(result)
   } catch (error) {
-    console.warn("[planner] DeepSeek fallback", getSafeDeepSeekErrorDetails(error))
+    const deepseekError = getSafeDeepSeekErrorDetails(error)
+    console.warn("[planner] DeepSeek fallback", deepseekError)
     return buildFallbackDecision(prepared.input, [
       ...prepared.warnings,
       "智能规划暂时不可用，已为你生成基础北京行程。",
     ], policy, {
       ...baseDiagnostics,
+      deepseekError,
       repairApplied: true,
       repairReason: "deepseek_error_fallback",
     })

@@ -83,6 +83,7 @@ export async function POST(request: Request) {
         normalizedDayCounts: diagnostics?.normalizedDayCounts,
         finalDayCounts: diagnostics?.finalDayCounts,
         droppedItemReasons: diagnostics?.droppedItemReasons,
+        deepseekError: diagnostics?.deepseekError,
         repairApplied: diagnostics?.repairApplied,
         repairReason: diagnostics?.repairReason,
       },
