@@ -1313,8 +1313,10 @@ export function AIPlannnerPage({
       }
 
       const attractionCandidates = uniqueSpots(
-        finalSpots.filter((spot) => isMainActivitySpot(spot))
-      )
+        [...filteredManual, ...finalSpots, ...autoRecommend, ...allSelectableSpots, ...citySpots].filter(
+          (spot) => isMainActivitySpot(spot)
+        )
+      ).slice(0, 40)
       const restaurantCandidateSpots = uniqueSpots(
         [...allSelectableSpots, ...citySpots, ...autoRecommend, ...filteredManual].filter(
           (spot) => getSpotRootCategory(spot) === "food"
@@ -1373,6 +1375,9 @@ export function AIPlannnerPage({
 
       if (plannerDecision?.plan.days.some((day) => day.spots.length === 0)) {
         throw new Error("智能规划结果缺少每日主活动点，已阻止空行程展示，请重新生成。")
+      }
+      if (plannerDecision && plannerDecision.plan.days.length !== requirement.days) {
+        throw new Error("智能规划结果天数与选择天数不一致，已阻止错误行程展示，请重新生成。")
       }
 
       const attractionMap = new Map(attractionCandidates.map((spot) => [spot.id, spot]))
@@ -1440,6 +1445,9 @@ export function AIPlannnerPage({
       )
       if (resolvedDays.some((day) => day.spots.length === 0)) {
         throw new Error("规划结果缺少每日景点时间线，已阻止空行程展示，请重新生成。")
+      }
+      if (resolvedDays.length !== requirement.days) {
+        throw new Error("规划结果天数与选择天数不一致，已阻止错误行程保存，请重新生成。")
       }
 
       const totals = computePlanTotals(resolvedDays)

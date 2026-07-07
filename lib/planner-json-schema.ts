@@ -130,11 +130,15 @@ const plannerCatalogStatsSchema = z.object({
 
 const plannerDayCountDiagnosticSchema = z.object({
   day: z.number().int().positive(),
+  dayIndex: z.number().int().positive().optional(),
   items: z.number().int().nonnegative().optional(),
+  totalItems: z.number().int().nonnegative().optional(),
   spots: z.number().int().nonnegative().optional(),
   mainActivities: z.number().int().nonnegative(),
   food: z.number().int().nonnegative(),
+  foodItems: z.number().int().nonnegative().optional(),
   hotel: z.number().int().nonnegative(),
+  hotelItems: z.number().int().nonnegative().optional(),
   transit: z.number().int().nonnegative(),
   rest: z.number().int().nonnegative(),
   note: z.number().int().nonnegative(),
@@ -150,6 +154,16 @@ const plannerDroppedItemReasonsSchema = z.object({
 }).strict()
 
 const plannerDiagnosticsSchema = z.object({
+  requestedDays: z.number().finite().optional(),
+  normalizedDays: z.number().int().positive().optional(),
+  modelReturnedDays: z.number().int().nonnegative().optional(),
+  finalDays: z.number().int().nonnegative().optional(),
+  requestedPace: z.string().optional(),
+  normalizedPace: z.string().optional(),
+  targetTotalItemsPerDay: z.string().optional(),
+  minMainActivitiesPerDay: z.number().int().nonnegative().optional(),
+  dayRepairApplied: z.boolean().optional(),
+  missingDaysRepaired: z.array(z.number().int().positive()).optional(),
   requestedPreferences: z.object({
     city: z.string(),
     totalDays: z.number().int().positive(),

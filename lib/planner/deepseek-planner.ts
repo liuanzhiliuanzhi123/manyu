@@ -20,6 +20,10 @@ import {
   isMainActivityItem,
   normalizePlannerItemType,
 } from "@/lib/planner/main-activity"
+import {
+  assertDaysPlanMatchesRequest,
+  buildMissingDayIndexes,
+} from "@/lib/planner/days-policy"
 import type {
   GeneratedPlan,
   GeneratedPlanDay,
@@ -85,10 +89,14 @@ function countRawModelDay(
 ): PlannerDayCountDiagnostic {
   const counts: PlannerDayCountDiagnostic = {
     day: day.dayIndex,
+    dayIndex: day.dayIndex,
     items: day.items.length,
+    totalItems: day.items.length,
     mainActivities: 0,
     food: 0,
+    foodItems: 0,
     hotel: 0,
+    hotelItems: 0,
     transit: 0,
     rest: 0,
     note: 0,
@@ -99,9 +107,13 @@ function countRawModelDay(
     const rootCategory = getRootCategoryFromPlannerItem(item)
     const normalizedType = normalizePlannerItemType(item)
     if (rootCategory === "scenic") counts.mainActivities += 1
-    else if (rootCategory === "food") counts.food += 1
-    else if (rootCategory === "hotel") counts.hotel += 1
-    else if (normalizedType === "transit" || normalizedType === "transport") counts.transit += 1
+    else if (rootCategory === "food") {
+      counts.food += 1
+      counts.foodItems = (counts.foodItems || 0) + 1
+    } else if (rootCategory === "hotel") {
+      counts.hotel += 1
+      counts.hotelItems = (counts.hotelItems || 0) + 1
+    } else if (normalizedType === "transit" || normalizedType === "transport") counts.transit += 1
     else if (normalizedType === "rest") counts.rest += 1
     else if (normalizedType === "note" || normalizedType === "weather") counts.note += 1
     else counts.unknown += 1
@@ -111,12 +123,18 @@ function countRawModelDay(
 }
 
 function countGeneratedPlanDay(day: GeneratedPlanDay): PlannerDayCountDiagnostic {
+  const food = Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId))
+  const hotel = Number(Boolean(day.hotel?.placeId))
   return {
     day: day.day,
+    dayIndex: day.day,
     spots: day.spots.length,
+    totalItems: day.spots.length + food + hotel,
     mainActivities: day.spots.length,
-    food: Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId)),
-    hotel: Number(Boolean(day.hotel?.placeId)),
+    food,
+    foodItems: food,
+    hotel,
+    hotelItems: hotel,
     transit: 0,
     rest: 0,
     note: 0,
@@ -215,6 +233,7 @@ function mapDeepSeekPlanToGeneratedPlan(
   const usedSpotIds = new Set<string>()
   const maxPerDay = policy.hardConstraints.maxMainActivitiesPerDay
   const rawModelDayCounts = rawPlan.daysPlan.map(countRawModelDay)
+  const missingDaysRepaired = buildMissingDayIndexes({ daysPlan: rawPlan.daysPlan }, input.totalDays)
 
   const dayMap = new Map(rawPlan.daysPlan.map((day) => [day.dayIndex, day]))
   const days: GeneratedPlanDay[] = Array.from({ length: input.totalDays }, (_, index) => {
@@ -342,8 +361,11 @@ function mapDeepSeekPlanToGeneratedPlan(
     warnings,
     diagnostics: {
       rawModelDayCounts,
+      modelReturnedDays: rawPlan.daysPlan.length,
       normalizedDayCounts: countGeneratedPlanDays(generated),
       droppedItemReasons,
+      missingDaysRepaired,
+      dayRepairApplied: missingDaysRepaired.length > 0,
     },
   }
 }
@@ -422,6 +444,7 @@ function finalizePlanAgainstPolicy(
 ): LlmPlannerResult {
   const sanitized = sanitizePlanAgainstCandidates(plan, input, policy)
   const repaired = repairGeneratedPlanWithPolicy(sanitized.plan, input, policy)
+  assertDaysPlanMatchesRequest(repaired.plan, input.totalDays)
   const issues = validateGeneratedPlanAgainstPolicy(repaired.plan, input, policy)
   const blockingIssues = issues.filter((issue) => issue.level === "error")
 
@@ -456,6 +479,15 @@ function finalizePlanAgainstPolicy(
       finalDayCounts: countGeneratedPlanDays(repaired.plan),
       repairApplied: finalRepairApplied,
       repairReason,
+      finalDays: repaired.plan.days.length,
+      missingDaysRepaired:
+        repaired.missingDaysRepaired.length > 0
+          ? repaired.missingDaysRepaired
+          : diagnostics.missingDaysRepaired,
+      dayRepairApplied:
+        repaired.missingDaysRepaired.length > 0 ||
+        diagnostics.dayRepairApplied ||
+        finalRepairApplied,
     },
   }
 }

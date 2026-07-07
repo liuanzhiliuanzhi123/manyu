@@ -260,8 +260,12 @@ export function buildFallbackGeneratedPlan(request: PlannerDecisionRequest): Pla
   const preferredSet = new Set(request.manualPreferredPlaceIds || [])
   const weatherText = getWeatherRuleText(request)
   const weatherNeedsBuffer = /雨|雷阵雨|雨雪|高温|大风|沙尘|天气暂不可用/u.test(weatherText)
+  const minFallbackMain =
+    policy.normalizedPreferences.effectivePace === "intensive"
+      ? Math.max(4, policy.hardConstraints.minMainActivitiesPerDay)
+      : policy.hardConstraints.minMainActivitiesPerDay
   const perDayLimit = Math.max(
-    policy.hardConstraints.minMainActivitiesPerDay,
+    minFallbackMain,
     policy.hardConstraints.maxMainActivitiesPerDay - (weatherNeedsBuffer ? 1 : 0)
   )
   const maxAttractions = Math.max(

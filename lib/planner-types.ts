@@ -143,11 +143,15 @@ export interface PlannerCatalogStats {
 
 export interface PlannerDayCountDiagnostic {
   day: number
+  dayIndex?: number
   items?: number
+  totalItems?: number
   spots?: number
   mainActivities: number
   food: number
+  foodItems?: number
   hotel: number
+  hotelItems?: number
   transit: number
   rest: number
   note: number
@@ -163,6 +167,16 @@ export interface PlannerDroppedItemReasons {
 }
 
 export interface PlannerDiagnostics {
+  requestedDays?: number
+  normalizedDays?: number
+  modelReturnedDays?: number
+  finalDays?: number
+  requestedPace?: PacePreference | string
+  normalizedPace?: string
+  targetTotalItemsPerDay?: string
+  minMainActivitiesPerDay?: number
+  dayRepairApplied?: boolean
+  missingDaysRepaired?: number[]
   requestedPreferences?: {
     city: string
     totalDays: number

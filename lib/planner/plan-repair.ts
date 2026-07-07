@@ -12,6 +12,7 @@ import {
   type PreferencePolicy,
 } from "@/lib/planner/preference-policy"
 import { isMainActivityItem } from "@/lib/planner/main-activity"
+import { buildMissingDayIndexes } from "@/lib/planner/days-policy"
 
 export interface PlanPolicyIssue {
   id: string
@@ -25,6 +26,7 @@ export interface PlanRepairResult {
   warnings: string[]
   issues: PlanPolicyIssue[]
   repairApplied: boolean
+  missingDaysRepaired: number[]
 }
 
 const REMOTE_DISTRICT_KEYWORDS = ["延庆", "怀柔", "密云", "平谷", "门头沟"]
@@ -193,6 +195,45 @@ function appendPreferenceExplanations(plan: GeneratedPlan, policy: PreferencePol
   return Array.from(new Set(explanations))
 }
 
+function createMissingDay(dayNumber: number, request: PlannerDecisionRequest): GeneratedPlanDay {
+  return {
+    day: dayNumber,
+    theme: `Day ${dayNumber} Beijing route`,
+    weather: request.weatherContext?.dayWeather[dayNumber - 1],
+    weatherAdvice: request.weatherContext?.dayWeather[dayNumber - 1]?.advice,
+    weatherTags: request.weatherContext?.dayWeather[dayNumber - 1]?.tags,
+    spots: [],
+    warnings: ["This day was missing from the model output and was rebuilt by policy repair."],
+  }
+}
+
+function ensureRequestedDaySkeletons(plan: GeneratedPlan, request: PlannerDecisionRequest) {
+  const byDay = new Map<number, GeneratedPlanDay>()
+  plan.days.forEach((day, index) => {
+    const normalizedDay = Number.isFinite(day.day) ? Math.round(day.day) : index + 1
+    if (normalizedDay >= 1 && normalizedDay <= request.totalDays && !byDay.has(normalizedDay)) {
+      byDay.set(normalizedDay, {
+        ...day,
+        day: normalizedDay,
+      })
+    }
+  })
+
+  return Array.from({ length: request.totalDays }, (_, index) => {
+    const dayNumber = index + 1
+    return byDay.get(dayNumber) || createMissingDay(dayNumber, request)
+  })
+}
+
+function totalItemCount(day: GeneratedPlanDay) {
+  return (
+    day.spots.length +
+    Number(Boolean(day.lunch?.placeId)) +
+    Number(Boolean(day.dinner?.placeId)) +
+    Number(Boolean(day.hotel?.placeId))
+  )
+}
+
 export function validateGeneratedPlanAgainstPolicy(
   plan: GeneratedPlan,
   request: PlannerDecisionRequest,
@@ -211,7 +252,36 @@ export function validateGeneratedPlanAgainstPolicy(
     })
   }
 
+  const missingDayIndexes = buildMissingDayIndexes(plan, request.totalDays)
+  if (missingDayIndexes.length > 0) {
+    issues.push({
+      id: "missing_day_index",
+      level: "error",
+      message: `Planner response is missing day indexes: ${missingDayIndexes.join(",")}.`,
+    })
+  }
+
+  const seenDayIndexes = new Set<number>()
+
   for (const day of plan.days) {
+    if (!Number.isInteger(day.day) || day.day < 1 || day.day > request.totalDays) {
+      issues.push({
+        id: "invalid_day_index",
+        level: "error",
+        day: day.day,
+        message: "Planner day index must be a 1-based number inside the requested trip length.",
+      })
+    }
+    if (seenDayIndexes.has(day.day)) {
+      issues.push({
+        id: "duplicate_day_index",
+        level: "error",
+        day: day.day,
+        message: "Planner returned duplicate day indexes.",
+      })
+    }
+    seenDayIndexes.add(day.day)
+
     const validSpots = day.spots.filter((spot) => attractionMap.has(spot.placeId))
     if (validSpots.length !== day.spots.length) {
       issues.push({
@@ -237,6 +307,18 @@ export function validateGeneratedPlanAgainstPolicy(
         level: "error",
         day: day.day,
         message: `第 ${day.day} 天主活动点不足，至少需要 ${policy.hardConstraints.minMainActivitiesPerDay} 个。`,
+      })
+    }
+
+    if (
+      policy.normalizedPreferences.effectivePace === "intensive" &&
+      totalItemCount({ ...day, spots: validSpots }) < 4
+    ) {
+      issues.push({
+        id: "insufficient_intensive_total_items",
+        level: "error",
+        day: day.day,
+        message: "Intensive pace requires at least 4 total daily items after meals and hotel suggestions.",
       })
     }
 
@@ -310,8 +392,16 @@ export function repairGeneratedPlanWithPolicy(
   const restaurantCandidates = request.restaurants.filter((candidate) => candidate.type === "restaurant")
   const hotelCandidates = request.hotels.filter((candidate) => candidate.type === "hotel")
   const usedSpotIds = new Set<string>()
+  const missingDaysRepaired = buildMissingDayIndexes(plan, request.totalDays)
+  if (missingDaysRepaired.length > 0 || plan.days.length !== request.totalDays) {
+    repairApplied = true
+    warnings.push(
+      `Rebuilt missing planner days: ${missingDaysRepaired.join(",") || "day_count_mismatch"}.`
+    )
+  }
+  const requestedDays = ensureRequestedDaySkeletons(plan, request)
 
-  const days = plan.days.map((sourceDay, index) => {
+  const days = requestedDays.map((sourceDay, index) => {
     const dayNumber = index + 1
     const seen = new Set<string>()
     let spots = sourceDay.spots.filter((spot) => {
@@ -415,5 +505,6 @@ export function repairGeneratedPlanWithPolicy(
     warnings,
     issues,
     repairApplied,
+    missingDaysRepaired,
   }
 }

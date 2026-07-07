@@ -7,7 +7,10 @@ import {
 } from "@/lib/planner/deepseek-client"
 import { generatePlanByDeepSeek } from "@/lib/planner/deepseek-planner"
 import { buildFallbackGeneratedPlan } from "@/lib/planner-fallback"
-import { filterBeijingPlannerCandidates } from "@/lib/planner/beijing-planner-context"
+import {
+  buildBeijingPlannerCandidates,
+  filterBeijingPlannerCandidates,
+} from "@/lib/planner/beijing-planner-context"
 import { buildWeatherPlanContext, getWeatherByCity } from "@/lib/weather-service"
 import {
   plannerDecisionRequestSchema,
@@ -21,6 +24,7 @@ import {
   getLegacyFieldsFromPolicy,
   type PreferencePolicy,
 } from "@/lib/planner/preference-policy"
+import { normalizeRequestedDays } from "@/lib/planner/days-policy"
 import type {
   GeneratedPlan,
   PlannerDayCountDiagnostic,
@@ -195,12 +199,18 @@ function withPreferenceTrace(policy: PreferencePolicy, repairApplied: boolean) {
 }
 
 function countFinalPlanDay(day: GeneratedPlan["days"][number]): PlannerDayCountDiagnostic {
+  const food = Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId))
+  const hotel = Number(Boolean(day.hotel?.placeId))
   return {
     day: day.day,
+    dayIndex: day.day,
     spots: day.spots.length,
+    totalItems: day.spots.length + food + hotel,
     mainActivities: day.spots.length,
-    food: Number(Boolean(day.lunch?.placeId)) + Number(Boolean(day.dinner?.placeId)),
-    hotel: Number(Boolean(day.hotel?.placeId)),
+    food,
+    foodItems: food,
+    hotel,
+    hotelItems: hotel,
     transit: 0,
     rest: 0,
     note: 0,
@@ -239,11 +249,59 @@ function withPlannerDiagnostics(
   const normalizedPreferences = withPreferenceTrace(policy, repairApplied)
   return {
     ...diagnostics,
+    requestedDays: diagnostics?.requestedDays ?? input.totalDays,
+    normalizedDays: input.totalDays,
+    finalDays: plan.days.length,
+    requestedPace: input.pace,
+    normalizedPace: policy.normalizedPreferences.effectivePace,
+    targetTotalItemsPerDay: policy.hardConstraints.targetTotalItemsPerDay,
+    minMainActivitiesPerDay: policy.hardConstraints.minMainActivitiesPerDay,
+    dayRepairApplied:
+      diagnostics?.dayRepairApplied ||
+      Boolean(diagnostics?.missingDaysRepaired?.length) ||
+      repairApplied,
+    missingDaysRepaired: diagnostics?.missingDaysRepaired || [],
     requestedPreferences: buildRequestedPreferences(input),
     normalizedPreferences,
     poiCatalogStats: buildCatalogStats(input),
     finalDayCounts: plan.days.map(countFinalPlanDay),
     repairApplied,
+  }
+}
+
+function withBeijingCandidateBackfill(
+  input: PlannerDecisionRequestInput,
+  policy: PreferencePolicy
+): PlannerDecisionRequestInput {
+  const attractionLimit = Math.max(
+    32,
+    Math.min(40, input.totalDays * policy.hardConstraints.maxMainActivitiesPerDay + 8)
+  )
+  const context = buildBeijingPlannerCandidates({
+    selectedPlaceIds: input.manualPreferredPlaceIds || [],
+    attractionLimit,
+    restaurantLimit: 80,
+    hotelLimit: 60,
+  })
+
+  const attractions = filterBeijingPlannerCandidates([
+    ...input.attractions,
+    ...context.attractions,
+  ]).slice(0, 40)
+  const restaurants = filterBeijingPlannerCandidates([
+    ...input.restaurants,
+    ...context.restaurants,
+  ]).slice(0, 80)
+  const hotels = filterBeijingPlannerCandidates([
+    ...input.hotels,
+    ...context.hotels,
+  ]).slice(0, 60)
+
+  return {
+    ...input,
+    attractions,
+    restaurants,
+    hotels,
   }
 }
 
@@ -261,12 +319,21 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
     if (!Number.isFinite(item.price) || (item.price as number) <= 0) return true
     return (item.price as number) <= Math.max(120, budgetUpper * 0.12)
   })
+  const minimumAttractions = input.totalDays * policy.hardConstraints.minMainActivitiesPerDay
+  const attractionPool =
+    budgetFilteredAttractions.length >= minimumAttractions ||
+    rawAttractions.length < minimumAttractions
+      ? budgetFilteredAttractions
+      : rawAttractions
+  if (attractionPool !== budgetFilteredAttractions) {
+    warnings.push("预算过滤会导致每日主活动不足，已放宽景点候选保留规则。")
+  }
 
   const maxAttractions = Math.max(
     input.totalDays * policy.hardConstraints.maxMainActivitiesPerDay,
     input.totalDays * policy.hardConstraints.minMainActivitiesPerDay
   )
-  const rankedAttractions = [...budgetFilteredAttractions]
+  const rankedAttractions = [...attractionPool]
     .sort(
       (a, b) =>
         scoreAttraction(b, input, preferredSet, policy) -
@@ -294,14 +361,21 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
     routeFeasibleSet.add(hint.toPlaceId)
   }
 
-  const routeFilteredAttractions = rankedAttractions.filter((item) => {
+  const routeCandidateAttractions = rankedAttractions.filter((item) => {
     if (manualKept.includes(item.placeId)) return true
     if (routeFeasibleSet.size === 0) return true
     return routeFeasibleSet.has(item.placeId)
   })
+  const routeFilteredAttractions =
+    routeCandidateAttractions.length >= minimumAttractions ||
+    rankedAttractions.length < minimumAttractions
+      ? routeCandidateAttractions
+      : rankedAttractions
 
   if (routeFilteredAttractions.length < rankedAttractions.length) {
     warnings.push("已剔除部分公交可达性极差的景点候选。")
+  } else if (routeCandidateAttractions.length < rankedAttractions.length) {
+    warnings.push("路线过滤会导致每日主活动不足，已放宽公交可达性过滤。")
   }
 
   const anchors = routeFilteredAttractions
@@ -345,10 +419,13 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
     warnings.push("已剔除离景点锚点过远或明显超预算的酒店候选。")
   }
 
-  if (filteredRestaurants.length === 0) {
+  const restaurants = filteredRestaurants.length > 0 ? filteredRestaurants : rawRestaurants
+  const hotels = filteredHotels.length > 0 ? filteredHotels : rawHotels
+
+  if (restaurants.length === 0) {
     warnings.push("餐饮候选不足，后续将使用基础规则兜底。")
   }
-  if (filteredHotels.length === 0) {
+  if (hotels.length === 0) {
     warnings.push("酒店候选不足，后续将使用基础规则兜底。")
   }
 
@@ -358,8 +435,8 @@ function applyHardRules(input: PlannerDecisionRequestInput, policy: PreferencePo
     input: {
       ...input,
       attractions: routeFilteredAttractions,
-      restaurants: filteredRestaurants,
-      hotels: filteredHotels,
+      restaurants,
+      hotels,
       manualPreferredPlaceIds: manualKept,
     },
     warnings,
@@ -427,10 +504,23 @@ export async function runPlannerDecision(
   payload: unknown
 ): Promise<PlannerDecisionResultOutput> {
   const parsed = plannerDecisionRequestSchema.parse(payload)
-  const weatherSummary = await getWeatherByCity(parsed.city || parsed.destination)
-  const parsedWithWeather: PlannerDecisionRequestInput = {
+  const dayPolicy = normalizeRequestedDays(parsed)
+  const parsedWithDays: PlannerDecisionRequestInput = {
     ...parsed,
-    weatherContext: buildWeatherPlanContext(weatherSummary, parsed.totalDays, parsed.startDate),
+    totalDays: dayPolicy.normalizedDays,
+    structuredPreferences: {
+      ...parsed.structuredPreferences,
+      days: dayPolicy.normalizedDays,
+    },
+  }
+  const baseDiagnostics: PlannerDiagnostics = {
+    requestedDays: dayPolicy.requestedDays,
+    normalizedDays: dayPolicy.normalizedDays,
+  }
+  const weatherSummary = await getWeatherByCity(parsedWithDays.city || parsedWithDays.destination)
+  const parsedWithWeather: PlannerDecisionRequestInput = {
+    ...parsedWithDays,
+    weatherContext: buildWeatherPlanContext(weatherSummary, parsedWithDays.totalDays, parsedWithDays.startDate),
   }
 
   if (!isBeijingInput(parsedWithWeather)) {
@@ -438,7 +528,8 @@ export async function runPlannerDecision(
     return buildFallbackDecision(
       withPolicyNormalizedFields(parsedWithWeather, policy),
       ["第四阶段当前仅支持北京，已降级为规则方案。"],
-      policy
+      policy,
+      baseDiagnostics
     )
   }
 
@@ -452,7 +543,10 @@ export async function runPlannerDecision(
   }
 
   const policy = buildPreferencePolicyFromRequest(beijingOnlyInput)
-  const policyInput = withPolicyNormalizedFields(beijingOnlyInput, policy)
+  const policyInput = withBeijingCandidateBackfill(
+    withPolicyNormalizedFields(beijingOnlyInput, policy),
+    policy
+  )
   const prepared = applyHardRules(policyInput, policy)
   if (weatherSummary.source === "fallback") {
     prepared.warnings.unshift("天气数据暂不可用，本方案按常规出行条件生成。")
@@ -464,7 +558,8 @@ export async function runPlannerDecision(
     return buildFallbackDecision(
       prepared.input,
       [...prepared.warnings, "可用景点候选不足，已使用规则兜底。"],
-      policy
+      policy,
+      baseDiagnostics
     )
   }
 
@@ -472,7 +567,8 @@ export async function runPlannerDecision(
     return buildFallbackDecision(
       prepared.input,
       [...prepared.warnings, "未配置智能规划密钥，已使用基础规划方案。"],
-      policy
+      policy,
+      baseDiagnostics
     )
   }
 
@@ -488,7 +584,10 @@ export async function runPlannerDecision(
         policy,
         deepseek.plan,
         deepseek.repairApplied,
-        deepseek.diagnostics
+        {
+          ...baseDiagnostics,
+          ...deepseek.diagnostics,
+        }
       ),
     }
     return plannerDecisionResultSchema.parse(result)
@@ -498,6 +597,7 @@ export async function runPlannerDecision(
       ...prepared.warnings,
       "智能规划暂时不可用，已为你生成基础北京行程。",
     ], policy, {
+      ...baseDiagnostics,
       repairApplied: true,
       repairReason: "deepseek_error_fallback",
     })
