@@ -15,6 +15,7 @@ import type {
   StructuredPlannerPreferences,
   TravelerGroup,
 } from "@/lib/planner/preference-types"
+import type { PlannerProviderCallMetrics } from "@/lib/observability/planner-observability-types"
 
 export type PacePreference = "fast" | "balanced" | "slow"
 
@@ -197,10 +198,14 @@ export interface PlannerDiagnostics {
     hasApiKey?: boolean
     baseUrl?: string
     model?: string
+    providerModel?: string
     errorType?: string
     statusCode?: number
     requestId?: string
+    durationMs?: number
+    timeoutMs?: number
   }
+  aiCall?: PlannerProviderCallMetrics
   repairApplied?: boolean
   repairReason?: string
 }

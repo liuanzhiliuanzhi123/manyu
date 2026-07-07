@@ -8,7 +8,7 @@
     "hardFailureCount": 0,
     "fallbackCount": 12,
     "repairAppliedCount": 0,
-    "generatedAt": "2026-07-07T07:00:36.597Z",
+    "generatedAt": "2026-07-07T07:28:10.631Z",
     "commonFailureReasons": []
   },
   "results": [
@@ -61,7 +61,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 16
+        "durationMs": 17
       }
     },
     {
@@ -108,7 +108,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 6
+        "durationMs": 8
       }
     },
     {
@@ -197,7 +197,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 5
+        "durationMs": 8
       }
     },
     {
@@ -333,7 +333,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 3
+        "durationMs": 4
       }
     },
     {
@@ -465,7 +465,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 3
+        "durationMs": 2
       }
     },
     {
@@ -512,7 +512,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 4
+        "durationMs": 5
       }
     },
     {
@@ -559,7 +559,7 @@
         "missingHotelSuggestions": false,
         "fallback": true,
         "repairApplied": false,
-        "durationMs": 4
+        "durationMs": 3
       }
     }
   ]

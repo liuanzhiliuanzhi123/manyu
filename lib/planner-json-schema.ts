@@ -153,6 +153,23 @@ const plannerDroppedItemReasonsSchema = z.object({
   nonMain: z.number().int().nonnegative(),
 }).strict()
 
+const plannerTokenUsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative().optional(),
+  completionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+}).strict()
+
+const plannerProviderCallMetricsSchema = z.object({
+  providerStatus: z.number().int().optional(),
+  providerModel: z.string().optional(),
+  requestId: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+  timeoutMs: z.number().int().nonnegative().optional(),
+  maxTokens: z.number().int().nonnegative().optional(),
+  callCount: z.number().int().nonnegative().optional(),
+  usage: plannerTokenUsageSchema.optional(),
+}).strict()
+
 const plannerDiagnosticsSchema = z.object({
   requestedDays: z.number().finite().optional(),
   normalizedDays: z.number().int().positive().optional(),
@@ -184,10 +201,14 @@ const plannerDiagnosticsSchema = z.object({
     hasApiKey: z.boolean().optional(),
     baseUrl: z.string().optional(),
     model: z.string().optional(),
+    providerModel: z.string().optional(),
     errorType: z.string().optional(),
     statusCode: z.number().int().optional(),
     requestId: z.string().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    timeoutMs: z.number().int().nonnegative().optional(),
   }).strict().optional(),
+  aiCall: plannerProviderCallMetricsSchema.optional(),
   repairApplied: z.boolean().optional(),
   repairReason: z.string().max(800).optional(),
 }).strict()

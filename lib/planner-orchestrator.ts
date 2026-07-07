@@ -5,6 +5,7 @@ import {
   getDeepSeekRuntimeConfig,
   hasDeepSeekApiKey,
 } from "@/lib/planner/deepseek-client"
+import { classifyPlannerError } from "@/lib/observability/planner-error-taxonomy"
 import { generatePlanByDeepSeek } from "@/lib/planner/deepseek-planner"
 import { buildFallbackGeneratedPlan } from "@/lib/planner-fallback"
 import {
@@ -481,28 +482,25 @@ function getSafeDeepSeekErrorDetails(error: unknown) {
     hasApiKey: runtime.hasApiKey,
     baseUrl: runtime.baseUrl,
     model: runtime.model,
+    providerModel: runtime.model,
   }
 
   if (error instanceof DeepSeekPlannerError) {
     return {
       ...base,
-      errorType: error.errorType,
+      errorType: classifyPlannerError(error, error.statusCode),
       statusCode: error.statusCode,
       requestId: error.requestId,
+      durationMs: error.durationMs,
+      timeoutMs: error.timeoutMs,
+      providerModel: error.providerModel || runtime.model,
     }
   }
 
   if (error instanceof Error) {
     return {
       ...base,
-      errorType:
-        error.name === "ZodError"
-          ? "schema_validation"
-          : error.message.includes("Preference policy validation")
-            ? "policy_validation"
-          : error.message.includes("JSON")
-            ? "invalid_json"
-            : "unknown",
+      errorType: classifyPlannerError(error),
     }
   }
 
@@ -576,11 +574,21 @@ export async function runPlannerDecision(
   }
 
   if (!hasDeepSeekApiKey()) {
+    const runtime = getDeepSeekRuntimeConfig()
     return buildFallbackDecision(
       prepared.input,
       [...prepared.warnings, "未配置智能规划密钥，已使用基础规划方案。"],
       policy,
-      baseDiagnostics
+      {
+        ...baseDiagnostics,
+        deepseekError: {
+          hasApiKey: false,
+          baseUrl: runtime.baseUrl,
+          model: runtime.model,
+          providerModel: runtime.model,
+          errorType: "env_missing",
+        },
+      }
     )
   }
 

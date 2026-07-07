@@ -24,6 +24,7 @@ import {
   assertDaysPlanMatchesRequest,
   buildMissingDayIndexes,
 } from "@/lib/planner/days-policy"
+import type { PlannerProviderCallMetrics } from "@/lib/observability/planner-observability-types"
 import type {
   GeneratedPlan,
   GeneratedPlanDay,
@@ -43,6 +44,7 @@ interface LlmPlannerResult {
 
 type DeepSeekPlanItem = DeepSeekGeneratedPlan["daysPlan"][number]["items"][number]
 type CandidateType = "attraction" | "restaurant" | "hotel"
+type DeepSeekJsonResponse = Awaited<ReturnType<typeof requestDeepSeekJson>>
 
 interface CandidateLookup {
   byId: Record<CandidateType, Map<string, PlannerCandidate>>
@@ -166,6 +168,40 @@ function countGeneratedPlanDay(day: GeneratedPlanDay): PlannerDayCountDiagnostic
 
 function countGeneratedPlanDays(plan: GeneratedPlan): PlannerDayCountDiagnostic[] {
   return plan.days.map(countGeneratedPlanDay)
+}
+
+function toProviderCallMetrics(response: DeepSeekJsonResponse): PlannerProviderCallMetrics {
+  return {
+    providerStatus: response.providerStatus,
+    providerModel: response.providerModel,
+    requestId: response.id,
+    durationMs: response.durationMs,
+    timeoutMs: response.timeoutMs,
+    maxTokens: response.maxTokens,
+    callCount: 1,
+    usage: response.usage,
+  }
+}
+
+function mergeProviderCallMetrics(
+  first: PlannerProviderCallMetrics,
+  second: PlannerProviderCallMetrics
+): PlannerProviderCallMetrics {
+  return {
+    providerStatus: second.providerStatus ?? first.providerStatus,
+    providerModel: second.providerModel ?? first.providerModel,
+    requestId: second.requestId ?? first.requestId,
+    durationMs: (first.durationMs || 0) + (second.durationMs || 0),
+    timeoutMs: Math.max(first.timeoutMs || 0, second.timeoutMs || 0),
+    maxTokens: Math.max(first.maxTokens || 0, second.maxTokens || 0),
+    callCount: (first.callCount || 1) + (second.callCount || 1),
+    usage: {
+      promptTokens: (first.usage?.promptTokens || 0) + (second.usage?.promptTokens || 0),
+      completionTokens:
+        (first.usage?.completionTokens || 0) + (second.usage?.completionTokens || 0),
+      totalTokens: (first.usage?.totalTokens || 0) + (second.usage?.totalTokens || 0),
+    },
+  }
 }
 
 function buildLookup(input: PlannerDecisionRequestInput): CandidateLookup {
@@ -531,6 +567,7 @@ export async function generatePlanByDeepSeek(
     maxTokens: budget.maxTokens,
     timeoutMs: budget.timeoutMs,
   })
+  const firstCallMetrics = toProviderCallMetrics(firstResponse)
 
   try {
     const parsed = parseDeepSeekPlanJson(firstResponse.text)
@@ -541,7 +578,10 @@ export async function generatePlanByDeepSeek(
       policy,
       mapped.warnings,
       false,
-      mapped.diagnostics
+      {
+        ...mapped.diagnostics,
+        aiCall: firstCallMetrics,
+      }
     )
   } catch (error) {
     if (!(error instanceof Error)) {
@@ -569,6 +609,10 @@ export async function generatePlanByDeepSeek(
       maxTokens: budget.maxTokens,
       timeoutMs: Math.min(30_000, budget.timeoutMs),
     })
+    const repairedCallMetrics = mergeProviderCallMetrics(
+      firstCallMetrics,
+      toProviderCallMetrics(repairedResponse)
+    )
 
     const repairedParsed = parseDeepSeekPlanJson(repairedResponse.text)
     const mapped = mapDeepSeekPlanToGeneratedPlan(repairedParsed, input, policy)
@@ -580,6 +624,7 @@ export async function generatePlanByDeepSeek(
       true,
       {
         ...mapped.diagnostics,
+        aiCall: repairedCallMetrics,
         repairApplied: true,
         repairReason: "model_json_repair",
       }

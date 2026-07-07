@@ -1,0 +1,56 @@
+{
+  "title": "Planner Observability Report",
+  "generatedAt": "2026-07-07T07:31:02.200Z",
+  "summary": {
+    "totalRuns": 0,
+    "deepseekRuns": 0,
+    "fallbackRuns": 0,
+    "fallbackRate": 0,
+    "repairAppliedRuns": 0,
+    "repairRate": 0,
+    "averageDurationMs": 0,
+    "p95DurationMs": 0,
+    "errorCounts": {},
+    "averagePromptTokens": 0,
+    "averageCompletionTokens": 0,
+    "averageTotalTokens": 0,
+    "estimatedTotalCost": {
+      "currency": "CNY",
+      "amount": 0,
+      "note": "pricing_not_configured; estimate_only; actual_costs_follow_provider_invoice"
+    },
+    "qualitySignals": {
+      "averageFinalDays": 0,
+      "daysMismatchCount": 0,
+      "zeroMainActivityDayCount": 0,
+      "averageMainActivitiesPerDay": 0,
+      "averageTotalItemsPerDay": 0
+    }
+  },
+  "failureAnalysis": {
+    "provider_402": 0,
+    "provider_429": 0,
+    "provider_timeout": 0,
+    "invalid_json": 0,
+    "schema_validation_failed": 0,
+    "repair_failed": 0
+  },
+  "recommendations": [
+    "No immediate observability action is required."
+  ],
+  "evalReport": {
+    "mode": "offline",
+    "totalCases": 12,
+    "passedCases": 12,
+    "failedCases": 0,
+    "averageScore": 100,
+    "hardFailureCount": 0,
+    "fallbackCount": 12,
+    "repairAppliedCount": 0
+  },
+  "notes": [
+    "Cost is an estimate only. Actual costs must be checked in the provider invoice.",
+    "Reports do not store API keys, tokens, sessions, full prompts, or full model responses.",
+    "Vercel serverless local file writes are not long-term persistence."
+  ]
+}

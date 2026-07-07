@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server"
+import {
+  createPlannerRunLog,
+  writePlannerRunLog,
+} from "@/lib/observability/planner-run-logger"
 import { normalizePlannerApiRequest, toPlannerApiError } from "@/lib/planner/planner-api-contract"
 import { checkPlannerRateLimit } from "@/lib/planner/rate-limit"
 import { runPlannerDecision } from "@/lib/planner-orchestrator"
@@ -37,6 +41,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now()
   try {
     const limit = checkPlannerRateLimit(await getRateLimitKey(request))
     if (!limit.allowed) {
@@ -59,10 +64,19 @@ export async function POST(request: Request) {
     const plannerRequest = normalizePlannerApiRequest(payload)
     const result = await runPlannerDecision(plannerRequest)
     const diagnostics = result.diagnostics
+    const plannerRunLog = createPlannerRunLog({
+      request: plannerRequest,
+      result,
+      startedAt,
+      durationMs: Date.now() - startedAt,
+    })
+    await writePlannerRunLog(plannerRunLog)
+
     return NextResponse.json({
       ok: true,
       data: result,
       meta: {
+        plannerRunId: plannerRunLog.id,
         source: result.source,
         fallback: result.source === "fallback",
         requestedDays: diagnostics?.requestedDays,
@@ -84,6 +98,16 @@ export async function POST(request: Request) {
         finalDayCounts: diagnostics?.finalDayCounts,
         droppedItemReasons: diagnostics?.droppedItemReasons,
         deepseekError: diagnostics?.deepseekError,
+        aiCall: diagnostics?.aiCall,
+        observability: {
+          errorType: plannerRunLog.errorType,
+          providerStatus: plannerRunLog.providerStatus,
+          providerModel: plannerRunLog.providerModel,
+          durationMs: plannerRunLog.durationMs,
+          timeoutMs: plannerRunLog.timeoutMs,
+          usage: plannerRunLog.usage,
+          estimatedCost: plannerRunLog.estimatedCost,
+        },
         repairApplied: diagnostics?.repairApplied,
         repairReason: diagnostics?.repairReason,
       },

@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval:planner": "tsx scripts/run-planner-evals.ts",
-    "eval:planner:live": "tsx scripts/run-planner-evals.ts --live"
+    "eval:planner:live": "tsx scripts/run-planner-evals.ts --live",
+    "observe:planner": "tsx scripts/summarize-planner-observability.ts"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",

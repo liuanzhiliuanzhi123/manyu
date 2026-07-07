@@ -1,5 +1,7 @@
 import "server-only"
 
+import type { PlannerTokenUsage } from "@/lib/observability/planner-observability-types"
+
 interface DeepSeekRequestInput {
   messages: Array<{
     role: "system" | "user" | "assistant"
@@ -23,6 +25,14 @@ interface DeepSeekChoice {
 interface DeepSeekChatResponse {
   id?: string
   choices?: DeepSeekChoice[]
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+  }
 }
 
 export type DeepSeekPlannerErrorType =
@@ -36,17 +46,29 @@ export class DeepSeekPlannerError extends Error {
   readonly errorType: DeepSeekPlannerErrorType
   readonly statusCode?: number
   readonly requestId?: string
+  readonly durationMs?: number
+  readonly timeoutMs?: number
+  readonly providerModel?: string
 
   constructor(
     message: string,
     errorType: DeepSeekPlannerErrorType,
-    details?: { statusCode?: number; requestId?: string }
+    details?: {
+      statusCode?: number
+      requestId?: string
+      durationMs?: number
+      timeoutMs?: number
+      providerModel?: string
+    }
   ) {
     super(message)
     this.name = "DeepSeekPlannerError"
     this.errorType = errorType
     this.statusCode = details?.statusCode
     this.requestId = details?.requestId
+    this.durationMs = details?.durationMs
+    this.timeoutMs = details?.timeoutMs
+    this.providerModel = details?.providerModel
   }
 }
 
@@ -72,6 +94,25 @@ function toTextContent(content: string | DeepSeekMessageContentPart[] | undefine
   return content.map((part) => part.text || "").join("")
 }
 
+function normalizeUsage(payload?: DeepSeekChatResponse["usage"]): PlannerTokenUsage | undefined {
+  if (!payload) return undefined
+  const promptTokens = payload.prompt_tokens ?? payload.promptTokens
+  const completionTokens = payload.completion_tokens ?? payload.completionTokens
+  const totalTokens = payload.total_tokens ?? payload.totalTokens
+  if (
+    !Number.isFinite(promptTokens) &&
+    !Number.isFinite(completionTokens) &&
+    !Number.isFinite(totalTokens)
+  ) {
+    return undefined
+  }
+  return {
+    promptTokens: Number.isFinite(promptTokens) ? promptTokens : undefined,
+    completionTokens: Number.isFinite(completionTokens) ? completionTokens : undefined,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : undefined,
+  }
+}
+
 export function hasDeepSeekApiKey() {
   return Boolean(getDeepSeekApiKey())
 }
@@ -86,12 +127,18 @@ export function getDeepSeekRuntimeConfig() {
 
 export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
   const apiKey = getDeepSeekApiKey()
+  const model = getDeepSeekModel()
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const maxTokens = input.maxTokens ?? 2400
   if (!apiKey) {
-    throw new DeepSeekPlannerError("DeepSeek API key is missing", "missing_key")
+    throw new DeepSeekPlannerError("DeepSeek API key is missing", "missing_key", {
+      providerModel: model,
+    })
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const startedAt = Date.now()
 
   try {
     const response = await fetch(`${getDeepSeekBaseUrl()}/chat/completions`, {
@@ -101,14 +148,15 @@ export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: getDeepSeekModel(),
+        model,
         messages: input.messages,
         response_format: { type: "json_object" },
         temperature: input.temperature ?? 0.4,
-        max_tokens: input.maxTokens ?? 2400,
+        max_tokens: maxTokens,
       }),
       signal: controller.signal,
     })
+    const durationMs = Date.now() - startedAt
 
     if (!response.ok) {
       throw new DeepSeekPlannerError("DeepSeek request failed", "http_status", {
@@ -117,6 +165,9 @@ export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
           response.headers.get("x-request-id") ||
           response.headers.get("x-ds-request-id") ||
           undefined,
+        durationMs,
+        timeoutMs,
+        providerModel: model,
       })
     }
 
@@ -126,19 +177,36 @@ export async function requestDeepSeekJson(input: DeepSeekRequestInput) {
     if (!text) {
       throw new DeepSeekPlannerError("DeepSeek returned empty content", "empty_response", {
         requestId: payload.id,
+        durationMs,
+        timeoutMs,
+        providerModel: model,
       })
     }
 
     return {
       id: payload.id,
       text,
+      usage: normalizeUsage(payload.usage),
+      providerStatus: response.status,
+      providerModel: model,
+      durationMs,
+      timeoutMs,
+      maxTokens,
     }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new DeepSeekPlannerError("DeepSeek request timed out", "timeout")
+      throw new DeepSeekPlannerError("DeepSeek request timed out", "timeout", {
+        durationMs: Date.now() - startedAt,
+        timeoutMs,
+        providerModel: model,
+      })
     }
     if (error instanceof DeepSeekPlannerError) throw error
-    throw error
+    throw new DeepSeekPlannerError("DeepSeek network error", "network", {
+      durationMs: Date.now() - startedAt,
+      timeoutMs,
+      providerModel: model,
+    })
   } finally {
     clearTimeout(timeout)
   }

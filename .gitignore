@@ -20,6 +20,7 @@ build
 
 # Local logs and generated caches
 .tmp_*
+reports/planner-runs.local.jsonl
 tsconfig.tsbuildinfo
 .vercel
 .env*
